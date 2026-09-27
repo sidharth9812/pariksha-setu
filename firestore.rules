@@ -1,0 +1,63 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid)) ||
+        (request.auth.token.email != null && request.auth.token.email.matches('(?i).*sidmalviya9827@gmail\\.com.*')) ||
+        (request.auth.token.email != null && request.auth.token.email.matches('(?i).*malviyagaribdas17@gmail\\.com.*')) ||
+        (request.auth.token.email != null && request.auth.token.email.matches('(?i).*admin.*'))
+      );
+    }
+
+    // Default deny for unspecified documents
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Admin registry
+    match /admins/{adminId} {
+      allow read, write: if true;
+    }
+
+    // User profiles: allow read, write, delete so all registered users and exam joiners are securely recorded in the users collection
+    match /users/{userId} {
+      allow read, write, delete: if true;
+    }
+
+    // Test Series
+    match /testSeries/{seriesId} {
+      allow read, write, delete: if true;
+    }
+
+    // Tests
+    match /tests/{testId} {
+      allow read, write, delete: if true;
+
+      // Questions sub-collection
+      match /questions/{questionId} {
+        allow read, write, delete: if true;
+      }
+    }
+
+    // Exam Sessions (Real-time participant presence & waiting room)
+    match /examSessions/{sessionId} {
+      allow read, write, delete: if true;
+    }
+
+    // Attempts & Submissions
+    match /attempts/{attemptId} {
+      allow read, write, delete: if true;
+    }
+
+    // Institute Settings
+    match /settings/{settingId} {
+      allow read, write, delete: if true;
+    }
+  }
+}

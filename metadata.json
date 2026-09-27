@@ -1,0 +1,8 @@
+{
+  "name": "Remix Remix ParikshaSetu - Competitive Exam Platform",
+  "description": "Production-ready, secure, mobile-first competitive examination test platform for MP Police Constable, MP SI, SSC and government examinations.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

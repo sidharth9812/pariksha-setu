@@ -1,0 +1,207 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "Registered students, exam joiners, and platform users",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "name": { "type": "string", "maxLength": 100 },
+        "email": { "type": "string", "maxLength": 120 },
+        "phone": { "type": "string", "maxLength": 30 },
+        "role": { "type": "string", "enum": ["student", "admin"] },
+        "photoUrl": { "type": "string", "maxLength": 500 },
+        "isBlocked": { "type": "boolean" },
+        "registrationType": { "type": "string", "enum": ["registered", "direct_exam_join", "guest"] },
+        "isRegistered": { "type": "boolean" },
+        "hasJoined": { "type": "boolean" },
+        "joinedAt": { "type": "string" },
+        "registeredAt": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "lastLogin": { "type": "string" },
+        "lastActive": { "type": "string" },
+        "totalExamsJoined": { "type": "number" },
+        "totalExamsSubmitted": { "type": "number" },
+        "joinedExams": { "type": "object" }
+      },
+      "required": ["uid", "name", "email", "role"]
+    },
+    "Admin": {
+      "title": "Admin",
+      "description": "Authoritative list of admin user UIDs",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string", "maxLength": 120 },
+        "role": { "type": "string", "enum": ["admin"] },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["uid", "email", "role"]
+    },
+    "TestSeries": {
+      "title": "TestSeries",
+      "description": "Competitive examination test series collection",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string", "maxLength": 150 },
+        "description": { "type": "string", "maxLength": 1000 },
+        "category": { "type": "string", "maxLength": 80 },
+        "status": { "type": "string", "enum": ["active", "inactive", "scheduled"] },
+        "startDate": { "type": "string", "maxLength": 30 },
+        "startTime": { "type": "string", "maxLength": 30 },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["title", "category", "status"]
+    },
+    "Test": {
+      "title": "Test",
+      "description": "Individual competitive exam test definition and live controls",
+      "type": "object",
+      "properties": {
+        "seriesId": { "type": "string" },
+        "seriesTitle": { "type": "string", "maxLength": 150 },
+        "title": { "type": "string", "maxLength": 150 },
+        "description": { "type": "string", "maxLength": 2000 },
+        "examCategory": { "type": "string", "maxLength": 80 },
+        "subject": { "type": "string", "maxLength": 100 },
+        "syllabus": { "type": "string", "maxLength": 2000 },
+        "instructions": { "type": "string", "maxLength": 3000 },
+        "totalQuestions": { "type": "number" },
+        "durationMinutes": { "type": "number" },
+        "startDate": { "type": "string", "maxLength": 30 },
+        "startTime": { "type": "string", "maxLength": 30 },
+        "marksPerQuestion": { "type": "number" },
+        "negativeMarks": { "type": "number" },
+        "passingMarks": { "type": "number" },
+        "instantResult": { "type": "boolean" },
+        "status": { "type": "string", "enum": ["draft", "published", "scheduled", "waiting", "live", "completed", "result_published", "released"] },
+        "accessCode": { "type": "string", "maxLength": 30 },
+        "accessPassword": { "type": "string", "maxLength": 50 },
+        "examStartTime": { "type": "string" },
+        "examEndTime": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["title", "seriesId", "durationMinutes", "marksPerQuestion", "negativeMarks", "status", "accessCode", "accessPassword"]
+    },
+    "Question": {
+      "title": "Question",
+      "description": "Exam question with multiple choice options and answer key",
+      "type": "object",
+      "properties": {
+        "testId": { "type": "string" },
+        "questionNumber": { "type": "number" },
+        "questionText": { "type": "string", "maxLength": 4000 },
+        "questionTextHindi": { "type": "string", "maxLength": 4000 },
+        "options": { "type": "object" },
+        "optionsHindi": { "type": "object" },
+        "correctAnswer": { "type": "string", "enum": ["A", "B", "C", "D"] },
+        "explanation": { "type": "string", "maxLength": 3000 },
+        "explanationHindi": { "type": "string", "maxLength": 3000 },
+        "subject": { "type": "string", "maxLength": 100 },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["testId", "questionNumber", "questionText", "options", "correctAnswer"]
+    },
+    "ExamSession": {
+      "title": "ExamSession",
+      "description": "Student real-time exam presence and monitoring",
+      "type": "object",
+      "properties": {
+        "testId": { "type": "string" },
+        "studentId": { "type": "string" },
+        "studentName": { "type": "string", "maxLength": 100 },
+        "studentEmail": { "type": "string", "maxLength": 120 },
+        "status": { "type": "string", "enum": ["waiting", "in_progress", "submitted", "auto_submitted"] },
+        "joinedAt": { "type": "string" },
+        "startedAt": { "type": "string" },
+        "submittedAt": { "type": "string" },
+        "lastHeartbeat": { "type": "string" },
+        "tabSwitchCount": { "type": "number" },
+        "activityLogs": { "type": "object" }
+      },
+      "required": ["testId", "studentId", "studentName", "status"]
+    },
+    "Attempt": {
+      "title": "Attempt",
+      "description": "Submitted exam record and evaluated scores",
+      "type": "object",
+      "properties": {
+        "testId": { "type": "string" },
+        "testTitle": { "type": "string", "maxLength": 150 },
+        "studentId": { "type": "string" },
+        "studentName": { "type": "string", "maxLength": 100 },
+        "studentEmail": { "type": "string", "maxLength": 120 },
+        "answers": { "type": "object" },
+        "startedAt": { "type": "string" },
+        "submittedAt": { "type": "string" },
+        "isAutoSubmitted": { "type": "boolean" },
+        "totalQuestions": { "type": "number" },
+        "attemptedCount": { "type": "number" },
+        "correctCount": { "type": "number" },
+        "incorrectCount": { "type": "number" },
+        "unattemptedCount": { "type": "number" },
+        "positiveMarks": { "type": "number" },
+        "negativeMarks": { "type": "number" },
+        "finalScore": { "type": "number" },
+        "percentage": { "type": "number" },
+        "accuracy": { "type": "number" },
+        "status": { "type": "string", "enum": ["submitted", "auto_submitted", "evaluated"] },
+        "tabSwitchCount": { "type": "number" }
+      },
+      "required": ["testId", "studentId", "studentName", "finalScore", "status"]
+    },
+    "InstituteSettings": {
+      "title": "InstituteSettings",
+      "description": "Coaching institute branding and defaults",
+      "type": "object",
+      "properties": {
+        "instituteName": { "type": "string", "maxLength": 150 },
+        "tagline": { "type": "string", "maxLength": 200 },
+        "logoUrl": { "type": "string", "maxLength": 500 },
+        "contactEmail": { "type": "string", "maxLength": 120 },
+        "contactPhone": { "type": "string", "maxLength": 50 },
+        "defaultDurationMinutes": { "type": "number" },
+        "defaultMarksPerQuestion": { "type": "number" },
+        "defaultNegativeMarks": { "type": "number" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["instituteName"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profiles for students and admins"
+    },
+    "/admins/{adminId}": {
+      "schema": "Admin",
+      "description": "Admin UID collection for role validation"
+    },
+    "/testSeries/{seriesId}": {
+      "schema": "TestSeries",
+      "description": "Competitive exam test series categories"
+    },
+    "/tests/{testId}": {
+      "schema": "Test",
+      "description": "Competitive tests configurations and live status"
+    },
+    "/tests/{testId}/questions/{questionId}": {
+      "schema": "Question",
+      "description": "Test questions under individual test"
+    },
+    "/examSessions/{sessionId}": {
+      "schema": "ExamSession",
+      "description": "Live student session tracking per test"
+    },
+    "/attempts/{attemptId}": {
+      "schema": "Attempt",
+      "description": "Permanent submitted student attempts and calculated results"
+    },
+    "/settings/{settingId}": {
+      "schema": "InstituteSettings",
+      "description": "Institute branding and default configurations"
+    }
+  }
+}

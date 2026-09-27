@@ -1,0 +1,27 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    // Institute branding & logos
+    match /branding/{allPaths=**} {
+      allow read: if true;
+      allow write: if true;
+    }
+
+    // Question images, formulas, and diagrams
+    match /questions/{allPaths=**} {
+      allow read: if true;
+      allow write: if true;
+    }
+
+    // Candidate profile pictures
+    match /profiles/{userId}/{allPaths=**} {
+      allow read: if true;
+      allow write: if true;
+    }
+
+    // Default fallback
+    match /{allPaths=**} {
+      allow read, write: if true;
+    }
+  }
+}
