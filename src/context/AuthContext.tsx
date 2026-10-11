@@ -7,6 +7,9 @@ import {
   signInUser,
   signUpUser,
   logOut,
+  findUserForPasswordReset,
+  verifyResetCode,
+  resetUserPassword,
 } from '../services/authService';
 import { UserProfile, UserRole } from '../types/exam';
 
@@ -15,8 +18,32 @@ interface AuthContextType {
   role: UserRole | null;
   loading: boolean;
   signIn: (email: string, password: string, role?: UserRole) => Promise<UserProfile>;
-  signUp: (email: string, password: string, role?: UserRole, name?: string) => Promise<UserProfile>;
+  signUp: (
+    emailOrPhoneOrParams:
+      | string
+      | {
+          name: string;
+          phone: string;
+          email?: string;
+          password: string;
+          role?: UserRole;
+        },
+    password?: string,
+    role?: UserRole,
+    name?: string
+  ) => Promise<UserProfile>;
   logout: () => Promise<void>;
+  findUserForPasswordReset: (emailOrPhone: string) => Promise<{
+    userId: string;
+    name: string;
+    phone?: string;
+    email: string;
+    maskedTarget: string;
+    code: string;
+    expiresAt: number;
+  }>;
+  verifyResetCode: (userId: string, code: string) => Promise<boolean>;
+  resetUserPassword: (userId: string, newPassword: string) => Promise<{ success: boolean; message: string }>;
   switchRoleForTesting?: (newRole: UserRole) => void;
 }
 
@@ -27,29 +54,37 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [loading, setLoading] = useState<boolean>(true);
 
   useEffect(() => {
+    // 1. Initialize user from local storage immediately if available
+    const local = getCurrentLocalUser();
+    if (local) {
+      setUser(local);
+    }
+    setLoading(false);
+
+    // 2. Synchronize with Firebase Auth state
     const unsubscribe = onAuthStateChanged(auth, (fbUser) => {
       if (fbUser) {
-        // Authenticate users only - do NOT query Firestore
-        const local = getCurrentLocalUser();
-        const profile = mapFirebaseUser(fbUser, local?.role, local?.name);
-        if (local?.phone) {
-          profile.phone = local.phone;
+        const currentLocal = getCurrentLocalUser();
+        const profile = mapFirebaseUser(fbUser, currentLocal?.role, currentLocal?.name);
+        if (currentLocal?.phone) {
+          profile.phone = currentLocal.phone;
+        }
+        if (currentLocal?.realEmail) {
+          profile.realEmail = currentLocal.realEmail;
         }
         setUser(profile);
-      } else {
-        setUser(null);
-        localStorage.removeItem('pariksha_current_user');
       }
-      setLoading(false);
+      // Note: do not wipe session if fbUser is null, because user may be authenticated
+      // via local verified credentials or recent password reset. Only explicit logout wipes session.
     });
 
     return () => unsubscribe();
   }, []);
 
-  const handleSignIn = async (email: string, password: string, role?: UserRole) => {
+  const handleSignIn = async (emailOrPhone: string, password: string, role?: UserRole) => {
     setLoading(true);
     try {
-      const u = await signInUser(email, password, role);
+      const u = await signInUser(emailOrPhone, password, role);
       setUser(u);
       return u;
     } finally {
@@ -57,11 +92,26 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  const handleSignUp = async (email: string, password: string, role?: UserRole, name?: string) => {
+  const handleSignUp = async (
+    emailOrPhoneOrParams:
+      | string
+      | {
+          name: string;
+          phone: string;
+          email?: string;
+          password: string;
+          role?: UserRole;
+        },
+    password?: string,
+    role?: UserRole,
+    name?: string
+  ) => {
     setLoading(true);
     try {
-      const u = await signUpUser(email, password, role, name);
-      setUser(u);
+      const u = await signUpUser(emailOrPhoneOrParams, password, role, name);
+      // Explicitly do not activate session immediately upon registration
+      // The user must log in with their newly registered credentials
+      setUser(null);
       return u;
     } finally {
       setLoading(false);
@@ -95,6 +145,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         signIn: handleSignIn,
         signUp: handleSignUp,
         logout: handleLogout,
+        findUserForPasswordReset,
+        verifyResetCode,
+        resetUserPassword,
         switchRoleForTesting,
       }}
     >

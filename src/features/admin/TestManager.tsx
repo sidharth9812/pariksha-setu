@@ -142,6 +142,10 @@ export const TestManager: React.FC<TestManagerProps> = ({
     const matchedSeries = seriesList.find((s) => s.id === seriesId);
     const seriesTitle = matchedSeries?.title || 'General Series';
 
+    // Normalize schedule dates and times
+    const cleanStartDate = startDate?.trim() || new Date().toISOString().slice(0, 10);
+    const cleanStartTime = startTime?.trim() || '10:00 AM';
+
     if (editingTest) {
       await updateTest(editingTest.id, {
         title,
@@ -157,8 +161,8 @@ export const TestManager: React.FC<TestManagerProps> = ({
         negativeMarks: Number(negativeMarks),
         passingMarks: Number(passingMarks),
         instantResult,
-        startDate,
-        startTime,
+        startDate: cleanStartDate,
+        startTime: cleanStartTime,
         status,
         accessCode: accessCode.trim().toUpperCase(),
         accessPassword: accessPassword.trim(),
@@ -178,8 +182,8 @@ export const TestManager: React.FC<TestManagerProps> = ({
         negativeMarks: Number(negativeMarks),
         passingMarks: Number(passingMarks),
         instantResult,
-        startDate,
-        startTime,
+        startDate: cleanStartDate,
+        startTime: cleanStartTime,
         status,
         accessCode: accessCode.trim().toUpperCase(),
         accessPassword: accessPassword.trim(),

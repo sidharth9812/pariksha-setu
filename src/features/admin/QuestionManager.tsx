@@ -22,6 +22,7 @@ import {
   bulkImportQuestions,
 } from '../../services/examService';
 import { uploadQuestionImage } from '../../services/storageService';
+import { DualLanguageBulkCsvModal } from './DualLanguageBulkCsvModal';
 
 interface QuestionManagerProps {
   test: TestItem;
@@ -53,11 +54,6 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({ test, onBack }
   const [imageUrl, setImageUrl] = useState('');
   const [isUploadingImage, setIsUploadingImage] = useState(false);
   const [imageUploadProgress, setImageUploadProgress] = useState(0);
-
-  // Bulk Import State
-  const [bulkCsvText, setBulkCsvText] = useState('');
-  const [bulkErrors, setBulkErrors] = useState<string[]>([]);
-  const [bulkSuccessCount, setBulkSuccessCount] = useState<number | null>(null);
 
   const loadQuestions = async () => {
     setLoading(true);
@@ -180,81 +176,6 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({ test, onBack }
     await loadQuestions();
   };
 
-  // CSV Validation & Bulk Import
-  const handleBulkImport = async () => {
-    setBulkErrors([]);
-    setBulkSuccessCount(null);
-
-    const lines = bulkCsvText.split('\n').map((l) => l.trim()).filter((l) => l.length > 0);
-    if (lines.length === 0) {
-      setBulkErrors(['Please paste CSV formatted text.']);
-      return;
-    }
-
-    const parsedQuestions: Partial<QuestionItem>[] = [];
-    const errors: string[] = [];
-
-    // Check if line 0 is header
-    const startIndex = lines[0].toLowerCase().includes('question') ? 1 : 0;
-
-    for (let i = startIndex; i < lines.length; i++) {
-      const rowNum = i + 1;
-      const parts = lines[i].split('|').map((p) => p.trim());
-
-      // Format expected: Question | Option A | Option B | Option C | Option D | Correct Answer | Explanation | Question Hindi
-      if (parts.length < 6) {
-        errors.push(`Row ${rowNum}: Insufficient columns. Minimum 6 pipe-separated columns required (Question | A | B | C | D | CorrectKey).`);
-        continue;
-      }
-
-      const qText = parts[0];
-      const a = parts[1];
-      const b = parts[2];
-      const c = parts[3];
-      const d = parts[4];
-      const rawKey = parts[5].toUpperCase();
-      const expl = parts[6] || '';
-      const qHindi = parts[7] || '';
-
-      if (!qText) {
-        errors.push(`Row ${rowNum}: Question text cannot be empty.`);
-      }
-      if (!a || !b || !c || !d) {
-        errors.push(`Row ${rowNum}: All 4 options (A, B, C, D) are required.`);
-      }
-      if (!['A', 'B', 'C', 'D'].includes(rawKey)) {
-        errors.push(`Row ${rowNum}: Invalid correct answer key "${parts[5]}". Must be A, B, C, or D.`);
-      }
-
-      if (errors.length === 0) {
-        parsedQuestions.push({
-          questionText: qText,
-          questionTextHindi: qHindi || undefined,
-          options: { A: a, B: b, C: c, D: d },
-          correctAnswer: rawKey as any,
-          explanation: expl,
-        });
-      }
-    }
-
-    if (errors.length > 0) {
-      setBulkErrors(errors);
-      return;
-    }
-
-    const count = await bulkImportQuestions(test.id, parsedQuestions);
-    setBulkSuccessCount(count);
-    await loadQuestions();
-    setTimeout(() => {
-      setIsBulkModalOpen(false);
-      setBulkCsvText('');
-    }, 1500);
-  };
-
-  const sampleCsvTemplate = `Question | Option A | Option B | Option C | Option D | Correct Answer | Explanation | Question Alternative
-What is the capital of Madhya Pradesh? | Indore | Bhopal | Jabalpur | Gwalior | B | Bhopal is the capital city | What is MP state capital?
-Who wrote the national song Vande Mataram? | Rabindranath Tagore | Bankim Chandra Chattopadhyay | Sarojini Naidu | Bhagat Singh | B | Written by Bankim Chandra Chattopadhyay | Who composed Vande Mataram?`;
-
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -279,9 +200,10 @@ Who wrote the national song Vande Mataram? | Rabindranath Tagore | Bankim Chandr
           <button
             onClick={() => setIsBulkModalOpen(true)}
             className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs sm:text-sm font-semibold flex items-center gap-1.5 cursor-pointer shadow-xs transition-colors"
+            title="Upload questions in bulk via separate English and Hindi CSV files with automatic settlement"
           >
-            <Upload className="w-4 h-4" />
-            <span>Bulk CSV Import</span>
+            <FileSpreadsheet className="w-4 h-4 text-emerald-400" />
+            <span>Bulk CSV Import (EN & HI)</span>
           </button>
 
           <button
@@ -373,9 +295,17 @@ Who wrote the national song Vande Mataram? | Rabindranath Tagore | Bankim Chandr
                           : 'border-slate-200 bg-slate-50 text-slate-700'
                       }`}
                     >
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
                         <span className="font-bold">{key}.</span>
-                        <span>{q.optionsHindi?.[key] || q.options[key]}</span>
+                        {q.options?.[key] && q.optionsHindi?.[key] && q.options[key].trim() !== q.optionsHindi[key].trim() ? (
+                          <span className="inline-flex items-center gap-1.5 flex-wrap">
+                            <span className="font-semibold text-slate-900">{q.options[key]}</span>
+                            <span className="text-slate-400 font-bold">/</span>
+                            <span className="text-slate-700">{q.optionsHindi[key]}</span>
+                          </span>
+                        ) : (
+                          <span>{q.options?.[key] || q.optionsHindi?.[key] || ''}</span>
+                        )}
                       </div>
                       {isCorrect && (
                         <span className="text-[10px] uppercase font-bold text-emerald-700 bg-emerald-100 px-1.5 py-0.5 rounded">
@@ -387,10 +317,12 @@ Who wrote the national song Vande Mataram? | Rabindranath Tagore | Bankim Chandr
                 })}
               </div>
 
-              {(q.explanationHindi || q.explanation) && (
+              {(q.explanation || q.explanationHindi) && (
                 <div className="p-2.5 bg-slate-50 rounded-xl border border-slate-100 text-xs text-slate-600">
                   <span className="font-semibold text-slate-800">Explanation: </span>
-                  {q.explanationHindi || q.explanation}
+                  {q.explanation && <span>{q.explanation}</span>}
+                  {q.explanation && q.explanationHindi && <span className="text-slate-400 mx-1.5 font-bold">/</span>}
+                  {q.explanationHindi && <span>{q.explanationHindi}</span>}
                 </div>
               )}
             </div>
@@ -633,84 +565,14 @@ Who wrote the national song Vande Mataram? | Rabindranath Tagore | Bankim Chandr
         </div>
       )}
 
-      {/* Bulk CSV Import Modal */}
-      {isBulkModalOpen && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
-          <div className="bg-white rounded-2xl max-w-2xl w-full shadow-2xl border border-slate-200 my-8 overflow-hidden">
-            <div className="bg-slate-900 px-6 py-4 text-white flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <FileSpreadsheet className="w-5 h-5 text-indigo-400" />
-                <h3 className="font-bold text-base">Bulk Question CSV Importer</h3>
-              </div>
-            </div>
-
-            <div className="p-6 space-y-4 text-xs sm:text-sm">
-              <p className="text-slate-600">
-                Paste pipe-separated (<code>|</code>) formatted lines. Minimum 6 columns required:
-              </p>
-              <div className="p-2.5 bg-slate-100 rounded-xl font-mono text-[11px] text-slate-700 overflow-x-auto">
-                Question | Option A | Option B | Option C | Option D | Correct Answer (A/B/C/D) | Explanation | Hindi Text
-              </div>
-
-              <div className="flex justify-end">
-                <button
-                  type="button"
-                  onClick={() => setBulkCsvText(sampleCsvTemplate)}
-                  className="text-xs text-indigo-600 hover:text-indigo-800 font-semibold underline cursor-pointer"
-                >
-                  Load Sample Template
-                </button>
-              </div>
-
-              <textarea
-                rows={8}
-                value={bulkCsvText}
-                onChange={(e) => setBulkCsvText(e.target.value)}
-                placeholder="Paste CSV rows here..."
-                className="w-full font-mono text-xs p-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none"
-              />
-
-              {bulkErrors.length > 0 && (
-                <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-red-700 text-xs space-y-1">
-                  <div className="font-bold flex items-center gap-1.5">
-                    <AlertCircle className="w-4 h-4 text-red-600" />
-                    <span>Validation Errors Found ({bulkErrors.length})</span>
-                  </div>
-                  <ul className="list-disc list-inside max-h-32 overflow-y-auto space-y-0.5">
-                    {bulkErrors.map((err, i) => (
-                      <li key={i}>{err}</li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-
-              {bulkSuccessCount !== null && (
-                <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-800 text-xs font-semibold flex items-center gap-2">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                  <span>Successfully imported {bulkSuccessCount} questions!</span>
-                </div>
-              )}
-
-              <div className="flex items-center gap-3 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setIsBulkModalOpen(false)}
-                  className="flex-1 py-2.5 border border-slate-300 rounded-xl text-xs font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  onClick={handleBulkImport}
-                  className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-xs cursor-pointer"
-                >
-                  Validate & Import Questions
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* Dual-Language Bulk CSV Import Modal */}
+      <DualLanguageBulkCsvModal
+        test={test}
+        isOpen={isBulkModalOpen}
+        onClose={() => setIsBulkModalOpen(false)}
+        onSuccess={loadQuestions}
+        currentQuestionCount={questions.length}
+      />
     </div>
   );
 };

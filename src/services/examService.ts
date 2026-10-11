@@ -663,7 +663,14 @@ export function subscribeToTestsList(onUpdate: (tests: TestItem[]) => void): () 
 
   const handleBroadcast = (event: MessageEvent) => {
     if (isUnsubscribed) return;
-    if (event.data?.type === 'TEST_UPDATED' || event.data?.type === 'TEST_DELETED') {
+    if (event.data?.type === 'TEST_UPDATED' && event.data?.payload) {
+      const updated = event.data.payload as TestItem;
+      const list = getLocal<TestItem[]>(LOCAL_TESTS_KEY, []);
+      const exists = list.some((t) => t.id === updated.id);
+      const nextList = exists ? list.map((t) => (t.id === updated.id ? updated : t)) : [updated, ...list];
+      setLocal(LOCAL_TESTS_KEY, nextList);
+      onUpdate(nextList);
+    } else if (event.data?.type === 'TEST_DELETED') {
       const list = getLocal<TestItem[]>(LOCAL_TESTS_KEY, []);
       onUpdate(list);
     }
@@ -811,13 +818,19 @@ export async function deleteQuestion(testId: string, questionId: string): Promis
   await updateTest(testId, { totalQuestions: localStore[testId].length });
 }
 
-export async function bulkImportQuestions(testId: string, questions: Partial<QuestionItem>[]): Promise<number> {
+export async function bulkImportQuestions(
+  testId: string,
+  questions: Partial<QuestionItem>[],
+  onProgress?: (progress: { current: number; total: number; percent: number }) => void
+): Promise<number> {
   let importedCount = 0;
   const localStore = getLocal<Record<string, QuestionItem[]>>(LOCAL_QUESTIONS_KEY, {});
   const currentList = localStore[testId] || [];
   let currentMaxNum = currentList.length;
+  const total = questions.length;
 
-  for (const q of questions) {
+  for (let idx = 0; idx < questions.length; idx++) {
+    const q = questions[idx];
     currentMaxNum++;
     const id = `q-${Date.now()}-${currentMaxNum}`;
     const newQ: QuestionItem = {
@@ -827,12 +840,12 @@ export async function bulkImportQuestions(testId: string, questions: Partial<Que
       questionText: q.questionText || '',
       questionTextHindi: q.questionTextHindi || '',
       options: q.options || { A: '', B: '', C: '', D: '' },
-      optionsHindi: q.optionsHindi || null as any,
+      optionsHindi: q.optionsHindi || (null as any),
       correctAnswer: q.correctAnswer || 'A',
       explanation: q.explanation || '',
       explanationHindi: q.explanationHindi || '',
       subject: q.subject || 'General',
-      imageUrl: q.imageUrl || null as any,
+      imageUrl: q.imageUrl || (null as any),
       createdAt: new Date().toISOString(),
     };
 
@@ -843,6 +856,14 @@ export async function bulkImportQuestions(testId: string, questions: Partial<Que
     }
     currentList.push(newQ);
     importedCount++;
+
+    if (onProgress) {
+      onProgress({
+        current: importedCount,
+        total,
+        percent: Math.round((importedCount / total) * 100),
+      });
+    }
   }
 
   localStore[testId] = currentList;

@@ -1,5 +1,4 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
-import { getAnalytics, isSupported } from 'firebase/analytics';
 import { getAuth } from 'firebase/auth';
 import { getStorage } from 'firebase/storage';
 import { getFirestore, doc, getDocFromServer } from 'firebase/firestore';
@@ -13,17 +12,9 @@ export const app = !getApps().length
   ? initializeApp(firebaseConfig)
   : getApp();
 
-// Initialize analytics safely if supported in browser environment
-export let analytics: any = null;
-if (typeof window !== 'undefined') {
-  isSupported()
-    .then((supported) => {
-      if (supported) {
-        analytics = getAnalytics(app);
-      }
-    })
-    .catch(() => {});
-}
+// Analytics is intentionally not imported or initialized to avoid '@firebase/analytics: Failed to fetch'
+// errors in sandboxed iframes or environments without Google Analytics endpoints
+export const analytics = null;
 
 // Export Authentication
 export const auth = getAuth(app);
@@ -32,3 +23,16 @@ export const auth = getAuth(app);
 export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
 export const storage = getStorage(app);
 
+// Validate connection to Firestore as per Firebase skill guidelines
+async function testConnection() {
+  try {
+    await getDocFromServer(doc(db, 'test', 'connection'));
+  } catch (error) {
+    if (error instanceof Error && error.message.includes('the client is offline')) {
+      console.warn('Please check your Firebase configuration.');
+    }
+  }
+}
+if (typeof window !== 'undefined') {
+  testConnection().catch(() => {});
+}

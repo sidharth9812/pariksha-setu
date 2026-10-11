@@ -24,6 +24,7 @@ import { ReattemptInstructionsView } from './features/student/ReattemptInstructi
 import { TestItem, StudentAttempt, UserRole } from './types/exam';
 import { getTestByAccessCode, joinExamSession, findStudentAttempt } from './services/examService';
 import { recordUserExamJoin } from './services/authService';
+import { getTestScheduleInfo } from './utils/scheduleHelper';
 
 function MainApp() {
   const { user, role, loading } = useAuth();
@@ -171,13 +172,23 @@ function MainApp() {
       // 2. Normal live/waiting exam: check if already submitted
       const existingAttempt = await findStudentAttempt(test.id, studentName, candidateUid);
       if (existingAttempt) {
-        if (!isConfirmedStart) {
-          // Candidate already submitted this test! Cannot rejoin - redirect directly to result!
+        // If this test is scheduled and currently live, check if the attempt was from BEFORE the current scheduled window
+        const sched = getTestScheduleInfo(test);
+        const attemptDate = existingAttempt.submittedAt ? new Date(existingAttempt.submittedAt).getTime() : 0;
+        const sessionStartDate = sched.startDateTime ? sched.startDateTime.getTime() : 0;
+        const isPastAttemptBeforeSchedule =
+          sched.isScheduled &&
+          sched.scheduleStatus === 'live' &&
+          sessionStartDate > 0 &&
+          attemptDate < sessionStartDate;
+
+        if (!isPastAttemptBeforeSchedule && !isConfirmedStart) {
+          // Candidate already submitted this test in this session! Cannot rejoin - redirect directly to result!
           setActiveAttempt(existingAttempt);
           setCurrentView('student-result');
           return;
         } else {
-          // Confirmed reattempt
+          // Fresh start for scheduled live session or confirmed reattempt
           if (typeof window !== 'undefined' && candidateUid) {
             localStorage.setItem(`pariksha_is_reattempt_${test.id}_${candidateUid}`, 'true');
             localStorage.removeItem(`pariksha_answers_${test.id}_${candidateUid}`);
@@ -487,62 +498,40 @@ function MainApp() {
   // RENDER: Student Portal View (Default)
   // -------------------------------------------------------------
   return (
-    <div className="min-h-screen bg-slate-100 flex flex-col">
-      <Navbar
-        currentView={currentView}
-        onNavigate={(view) => {
-          if (view === 'admin-dashboard' || view === 'admin-live') {
-            setCurrentView('admin');
-            setAdminTab(view === 'admin-live' ? 'live' : 'dashboard');
+    <>
+      <StudentHome
+        onSelectTest={(t) => {
+          if (t.status === 'released') {
+            handleOpenReattemptInstructions(t, candidateName || user?.name || 'Candidate');
           } else {
-            setCurrentView(view);
+            setPreselectedTestForJoin(t);
+            setIsJoinModalOpen(true);
           }
+        }}
+        onOpenJoinModalWithTest={(t) => {
+          if (t.status === 'released') {
+            handleOpenReattemptInstructions(t, candidateName || user?.name || 'Candidate');
+          } else {
+            setPreselectedTestForJoin(t);
+            setIsJoinModalOpen(true);
+          }
+        }}
+        onReattemptTest={(testToReattempt) => {
+          handleOpenReattemptInstructions(testToReattempt, candidateName || user?.name || 'Candidate');
+        }}
+        onViewAttempt={(att) => {
+          setActiveAttempt(att);
+          setCurrentView('student-result');
         }}
         onOpenJoinModal={() => {
           setPreselectedTestForJoin(null);
           setIsJoinModalOpen(true);
         }}
+        onNavigateToAdmin={() => {
+          setCurrentView('admin');
+          setAdminTab('dashboard');
+        }}
       />
-
-      <main className="flex-1">
-        <StudentHome
-          onSelectTest={(t) => {
-            if (t.status === 'released') {
-              handleOpenReattemptInstructions(t, candidateName || user?.name || 'Candidate');
-            } else {
-              setPreselectedTestForJoin(t);
-              setIsJoinModalOpen(true);
-            }
-          }}
-          onOpenJoinModalWithTest={(t) => {
-            if (t.status === 'released') {
-              handleOpenReattemptInstructions(t, candidateName || user?.name || 'Candidate');
-            } else {
-              setPreselectedTestForJoin(t);
-              setIsJoinModalOpen(true);
-            }
-          }}
-          onReattemptTest={(testToReattempt) => {
-            handleOpenReattemptInstructions(testToReattempt, candidateName || user?.name || 'Candidate');
-          }}
-          onViewAttempt={(att) => {
-            setActiveAttempt(att);
-            setCurrentView('student-result');
-          }}
-        />
-      </main>
-
-      {/* Footer */}
-      <footer className="bg-white border-t border-slate-200 py-6 text-center text-xs text-slate-500">
-        <div className="max-w-7xl mx-auto px-4 space-y-1">
-          <p className="font-semibold text-slate-700">
-            {settings.instituteName} &bull; Online Competitive Examination System
-          </p>
-          <p className="text-slate-400">
-            MP Police Constable &bull; MP Sub-Inspector (SI) &bull; SSC CGL/GD &bull; State Government Exams
-          </p>
-        </div>
-      </footer>
 
       {/* Protected Test Link & Password Entry Modal */}
       <AccessExamModal
@@ -567,7 +556,7 @@ function MainApp() {
           setCurrentView('student-result');
         }}
       />
-    </div>
+    </>
   );
 }
 

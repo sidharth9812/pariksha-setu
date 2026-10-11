@@ -558,7 +558,15 @@ export const StudentResultView: React.FC<StudentResultViewProps> = ({
                                   >
                                     <div>
                                       <span className="font-bold mr-1.5">{key}.</span>
-                                      <span>{q.options?.[key] || q.optionsHindi?.[key] || ''}</span>
+                                      {q.options?.[key] && q.optionsHindi?.[key] && q.options[key].trim() !== q.optionsHindi[key].trim() ? (
+                                        <span className="inline-flex items-center gap-1.5 flex-wrap">
+                                          <span className="font-semibold">{q.options[key]}</span>
+                                          <span className="text-slate-400 font-bold">/</span>
+                                          <span>{q.optionsHindi[key]}</span>
+                                        </span>
+                                      ) : (
+                                        <span>{q.options?.[key] || q.optionsHindi?.[key] || ''}</span>
+                                      )}
                                     </div>
                                     <div className="flex items-center gap-1 shrink-0">
                                       {isStudentPick && (

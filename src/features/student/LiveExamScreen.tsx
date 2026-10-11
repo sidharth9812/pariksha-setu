@@ -658,18 +658,17 @@ export const LiveExamScreen: React.FC<LiveExamScreenProps> = ({
                     </div>
 
                     {/* Option Text */}
-                    <div className="flex-1 space-y-1 text-sm sm:text-base text-slate-800">
-                      {(languageMode === 'both' || languageMode === 'hi') && optHindi && (
-                        <div className="font-medium text-slate-900">{optHindi}</div>
-                      )}
-                      {(languageMode === 'both' || languageMode === 'en') && (
-                        <div
-                          className={
-                            optHindi && languageMode === 'both' ? 'text-xs sm:text-sm text-slate-500' : 'font-medium'
-                          }
-                        >
-                          {optEng}
+                    <div className="flex-1 text-sm sm:text-base text-slate-800">
+                      {languageMode === 'both' && optEng && optHindi && optEng.trim() !== optHindi.trim() ? (
+                        <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+                          <span className="font-semibold text-slate-900">{optEng}</span>
+                          <span className="text-slate-400 font-bold">/</span>
+                          <span className="font-medium text-slate-800">{optHindi}</span>
                         </div>
+                      ) : languageMode === 'hi' ? (
+                        <div className="font-medium text-slate-900">{optHindi || optEng}</div>
+                      ) : (
+                        <div className="font-medium text-slate-900">{optEng || optHindi}</div>
                       )}
                     </div>
                   </div>

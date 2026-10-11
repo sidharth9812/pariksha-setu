@@ -13,6 +13,7 @@ import {
   ShieldAlert,
   User,
   X,
+  FileText,
 } from 'lucide-react';
 import { TestItem, StudentAttempt, TestSeries, QuestionItem } from '../../types/exam';
 import {
@@ -22,12 +23,17 @@ import {
   getQuestionsForTest,
   subscribeToTestAttempts,
 } from '../../services/examService';
+import { useInstitute } from '../../context/InstituteContext';
+import { useAuth } from '../../context/AuthContext';
+import { downloadMeritResultPdf } from '../../utils/pdfExportHelper';
 
 interface ResultsDashboardProps {
   initialTestId?: string;
 }
 
 export const ResultsDashboard: React.FC<ResultsDashboardProps> = ({ initialTestId }) => {
+  const { user } = useAuth();
+  const { settings } = useInstitute();
   const [tests, setTests] = useState<TestItem[]>([]);
   const [seriesList, setSeriesList] = useState<TestSeries[]>([]);
   const [selectedTestId, setSelectedTestId] = useState<string>(initialTestId || 'all');
@@ -119,6 +125,44 @@ export const ResultsDashboard: React.FC<ResultsDashboardProps> = ({ initialTestI
     }
   };
 
+  // Export to PDF Merit & Result List (Admin Only)
+  const exportToPDF = () => {
+    if (user?.role !== 'admin') {
+      alert('Access denied. Download Merit List (PDF) is an admin-only feature.');
+      return;
+    }
+
+    if (filtered.length === 0) {
+      alert('No results available to download.');
+      return;
+    }
+
+    const selectedTest = tests.find((t) => t.id === selectedTestId);
+    const testTitle = selectedTest
+      ? selectedTest.title
+      : selectedTestId === 'all'
+      ? (tests.length === 1 ? tests[0].title : 'All Examinations Merit List')
+      : (filtered[0]?.testTitle || 'Competitive Examination');
+
+    const examDate = selectedTest?.startDate;
+    const examTime = selectedTest?.startTime || (selectedTest?.examStartTime ? new Date(selectedTest.examStartTime).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true }) : undefined);
+
+    const candidates = filtered.map((att, idx) => ({
+      rank: idx + 1,
+      studentName: att.studentName,
+      finalScore: att.finalScore,
+      submittedAt: att.submittedAt,
+    }));
+
+    downloadMeritResultPdf({
+      testName: testTitle,
+      examinationDate: examDate,
+      examinationTime: examTime,
+      instituteName: settings.instituteName || 'ParikshaSetu Examination Portal',
+      candidates,
+    });
+  };
+
   // Export to CSV
   const exportToCSV = () => {
     if (filtered.length === 0) {
@@ -184,13 +228,26 @@ export const ResultsDashboard: React.FC<ResultsDashboardProps> = ({ initialTestI
           </p>
         </div>
 
-        <button
-          onClick={exportToCSV}
-          className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs sm:text-sm font-semibold flex items-center gap-1.5 cursor-pointer shadow-xs transition-colors self-start"
-        >
-          <Download className="w-4 h-4" />
-          <span>Export Results (CSV)</span>
-        </button>
+        <div className="flex flex-wrap items-center gap-2.5 self-start">
+          {user?.role === 'admin' && (
+            <button
+              onClick={exportToPDF}
+              className="px-4 py-2.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs sm:text-sm font-bold flex items-center gap-1.5 cursor-pointer shadow-xs transition-all hover:shadow-md"
+              title="Download official rank-wise merit list in PDF format (Admin Only)"
+            >
+              <FileText className="w-4 h-4" />
+              <span>Download Merit List (PDF)</span>
+            </button>
+          )}
+
+          <button
+            onClick={exportToCSV}
+            className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs sm:text-sm font-semibold flex items-center gap-1.5 cursor-pointer shadow-xs transition-colors"
+          >
+            <Download className="w-4 h-4" />
+            <span>Export CSV</span>
+          </button>
+        </div>
       </div>
 
       {/* Filters & Search */}

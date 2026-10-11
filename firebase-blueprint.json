@@ -22,7 +22,14 @@
         "lastActive": { "type": "string" },
         "totalExamsJoined": { "type": "number" },
         "totalExamsSubmitted": { "type": "number" },
-        "joinedExams": { "type": "object" }
+        "joinedExams": { "type": "object" },
+        "realEmail": { "type": "string", "maxLength": 120 },
+        "authEmail": { "type": "string", "maxLength": 120 },
+        "passwordHash": { "type": "string", "maxLength": 128 },
+        "passwordSalt": { "type": "string", "maxLength": 64 },
+        "resetCode": { "type": "string", "maxLength": 10 },
+        "resetExpiresAt": { "type": "number" },
+        "updatedAt": { "type": "string" }
       },
       "required": ["uid", "name", "email", "role"]
     },

@@ -102,7 +102,15 @@ export const TestPreviewModal: React.FC<TestPreviewModalProps> = ({ test, onClos
                         >
                           {key}
                         </span>
-                        <span>{currentQ.optionsHindi?.[key] || currentQ.options[key]}</span>
+                        {currentQ.options?.[key] && currentQ.optionsHindi?.[key] && currentQ.options[key].trim() !== currentQ.optionsHindi[key].trim() ? (
+                          <span className="inline-flex items-center gap-1.5 flex-wrap">
+                            <span className="font-semibold text-slate-900">{currentQ.options[key]}</span>
+                            <span className="text-slate-400 font-bold">/</span>
+                            <span className="text-slate-700">{currentQ.optionsHindi[key]}</span>
+                          </span>
+                        ) : (
+                          <span>{currentQ.options?.[key] || currentQ.optionsHindi?.[key] || ''}</span>
+                        )}
                       </div>
 
                       {isCorrect && (

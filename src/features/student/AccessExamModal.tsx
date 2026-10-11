@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { Lock, X, AlertCircle, Play, CheckCircle2, Loader2, RefreshCw, KeyRound, User, Award, Eye, ArrowRight, ShieldCheck, RotateCw, Sparkles } from 'lucide-react';
+import { Lock, X, AlertCircle, Play, CheckCircle2, Loader2, RefreshCw, KeyRound, User, Award, Eye, ArrowRight, ShieldCheck, RotateCw, Sparkles, Calendar } from 'lucide-react';
 import { TestItem, StudentAttempt } from '../../types/exam';
 import { getTestByAccessCode, normalizeCode, findStudentAttempt } from '../../services/examService';
 import { useAuth } from '../../context/AuthContext';
 import { useInstitute } from '../../context/InstituteContext';
+import { getTestScheduleInfo } from '../../utils/scheduleHelper';
 
 interface AccessExamModalProps {
   isOpen: boolean;
@@ -209,13 +210,26 @@ export const AccessExamModal: React.FC<AccessExamModalProps> = ({
       const existingAttempt = await findStudentAttempt(targetTest.id, finalName, candidateUid);
 
       if (existingAttempt) {
-        // Candidate has already submitted this examination!
-        // Immediately route to result page and never allow rejoining or waiting room!
-        if (onViewResult) {
-          onViewResult(existingAttempt, targetTest);
+        // If this test is scheduled and currently live, check if the attempt was from BEFORE the current scheduled window
+        const sched = getTestScheduleInfo(targetTest);
+        const attemptDate = existingAttempt.submittedAt ? new Date(existingAttempt.submittedAt).getTime() : 0;
+        const sessionStartDate = sched.startDateTime ? sched.startDateTime.getTime() : 0;
+        const isPastAttemptBeforeSchedule =
+          sched.isScheduled &&
+          sched.scheduleStatus === 'live' &&
+          sessionStartDate > 0 &&
+          attemptDate < sessionStartDate &&
+          activeIntent !== 'result';
+
+        if (!isPastAttemptBeforeSchedule) {
+          // Candidate has already submitted this examination in current session or requested result!
+          // Route to result page and never allow rejoining!
+          if (onViewResult) {
+            onViewResult(existingAttempt, targetTest);
+          }
+          setLoading(false);
+          return;
         }
-        setLoading(false);
-        return;
       }
 
       // If exam is completed/ended and no attempt was found for this candidate
@@ -231,6 +245,23 @@ export const AccessExamModal: React.FC<AccessExamModalProps> = ({
       if (activeIntent === 'result') {
         setError(
           `No completed examination record was found for Candidate "${finalName}". If you have not taken this examination yet, click "Take Examination" above.`
+        );
+        setLoading(false);
+        return;
+      }
+
+      // Check if this test is scheduled and not yet startable
+      const sched = getTestScheduleInfo(targetTest);
+      if (sched.isScheduled && sched.scheduleStatus === 'upcoming') {
+        setError(
+          `This examination is scheduled for ${sched.formattedDate} at ${sched.formattedStartTime}. You cannot start this exam early. Please return at the scheduled time.`
+        );
+        setLoading(false);
+        return;
+      }
+      if (sched.isScheduled && sched.scheduleStatus === 'expired') {
+        setError(
+          `The scheduled examination window for "${targetTest.title}" concluded at ${sched.formattedEndTime} on ${sched.formattedDate}. Access is now closed.`
         );
         setLoading(false);
         return;
@@ -297,31 +328,65 @@ export const AccessExamModal: React.FC<AccessExamModalProps> = ({
                   {resolvedTest.examCategory} &bull; {resolvedTest.seriesTitle}
                 </span>
                 <span className={`inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-full ${
-                  resolvedTest.status === 'released'
-                    ? 'text-emerald-800 bg-emerald-100 border border-emerald-300'
-                    : isExamEnded
-                    ? 'text-amber-800 bg-amber-100 border border-amber-200'
-                    : 'text-emerald-700 bg-emerald-100/80'
+                  resolvedTest ? (() => {
+                    const sched = getTestScheduleInfo(resolvedTest);
+                    if (sched.isScheduled && sched.scheduleStatus === 'upcoming') {
+                      return 'text-purple-800 bg-purple-100 border border-purple-300';
+                    }
+                    return resolvedTest.status === 'released'
+                      ? 'text-emerald-800 bg-emerald-100 border border-emerald-300'
+                      : isExamEnded
+                      ? 'text-amber-800 bg-amber-100 border border-amber-200'
+                      : 'text-emerald-700 bg-emerald-100/80';
+                  })() : ''
                 }`}>
-                  {resolvedTest.status === 'released' ? (
-                    <>
-                      <RotateCw className="w-3.5 h-3.5 text-emerald-600" />
-                      <span>Released &bull; Reattempt Mode</span>
-                    </>
-                  ) : isExamEnded ? (
-                    <>
-                      <Award className="w-3.5 h-3.5 text-amber-600" />
-                      <span>Exam Completed</span>
-                    </>
-                  ) : (
-                    <>
-                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                      <span>Verified Paper</span>
-                    </>
-                  )}
+                  {resolvedTest ? (() => {
+                    const sched = getTestScheduleInfo(resolvedTest);
+                    if (sched.isScheduled && sched.scheduleStatus === 'upcoming') {
+                      return (
+                        <>
+                          <Calendar className="w-3.5 h-3.5 text-purple-600" />
+                          <span>Scheduled &bull; Upcoming</span>
+                        </>
+                      );
+                    }
+                    if (resolvedTest.status === 'released') {
+                      return (
+                        <>
+                          <RotateCw className="w-3.5 h-3.5 text-emerald-600" />
+                          <span>Released &bull; Reattempt Mode</span>
+                        </>
+                      );
+                    }
+                    if (isExamEnded) {
+                      return (
+                        <>
+                          <Award className="w-3.5 h-3.5 text-amber-600" />
+                          <span>Exam Completed</span>
+                        </>
+                      );
+                    }
+                    return (
+                      <>
+                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                        <span>Verified Paper</span>
+                      </>
+                    );
+                  })() : null}
                 </span>
               </div>
               <div className="text-sm font-bold text-slate-900 leading-snug">{resolvedTest.title}</div>
+              {resolvedTest && (() => {
+                const sched = getTestScheduleInfo(resolvedTest);
+                if (sched.isScheduled && sched.scheduleStatus === 'upcoming') {
+                  return (
+                    <div className="text-xs font-semibold text-purple-900 bg-purple-50 p-2 rounded-lg border border-purple-200">
+                      Starts on <strong>{sched.formattedDate}</strong> at <strong>{sched.formattedStartTime}</strong> ({sched.timeRemainingText})
+                    </div>
+                  );
+                }
+                return null;
+              })()}
               <div className="flex items-center gap-3 text-xs text-slate-600 font-medium pt-1 border-t border-slate-200/70">
                 <span>Duration: <strong>{resolvedTest.durationMinutes} Mins</strong></span>
                 <span>&bull;</span>

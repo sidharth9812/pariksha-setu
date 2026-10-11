@@ -261,8 +261,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
               className="w-full text-left p-3 rounded-xl border border-slate-200 hover:border-indigo-300 hover:bg-indigo-50/50 transition-all flex items-center justify-between cursor-pointer"
             >
               <div>
-                <div className="text-xs font-bold text-slate-800">Merit List & CSV Export</div>
-                <div className="text-[11px] text-slate-500">Candidate ranking and scores</div>
+                <div className="text-xs font-bold text-slate-800">Merit List & PDF/CSV Export</div>
+                <div className="text-[11px] text-slate-500">Download merit list PDF and scores</div>
               </div>
               <ArrowUpRight className="w-4 h-4 text-slate-400" />
             </button>
