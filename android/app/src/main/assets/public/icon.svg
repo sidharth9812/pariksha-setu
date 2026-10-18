@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1e1b4b" />
+      <stop offset="50%" stop-color="#312e81" />
+      <stop offset="100%" stop-color="#1e293b" />
+    </linearGradient>
+    <linearGradient id="primaryGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#38bdf8" />
+      <stop offset="100%" stop-color="#6366f1" />
+    </linearGradient>
+    <linearGradient id="accentGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fb923c" />
+      <stop offset="100%" stop-color="#f59e0b" />
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="12" stdDeviation="16" flood-color="#000000" flood-opacity="0.4" />
+    </filter>
+  </defs>
+
+  <!-- Background rounded rectangle -->
+  <rect width="512" height="512" rx="112" fill="url(#bg)" />
+  <rect width="512" height="512" rx="112" fill="none" stroke="rgba(255, 255, 255, 0.12)" stroke-width="4" />
+
+  <g filter="url(#shadow)">
+    <!-- Bridge & Arch Base (Setu) -->
+    <path d="M128 352 Q256 280 384 352 L384 372 Q256 304 128 372 Z" fill="url(#primaryGrad)" />
+    
+    <!-- Open Book / Wings of Education -->
+    <!-- Left Page -->
+    <path d="M256 296 C216 270 160 268 128 274 L128 206 C164 200 220 204 256 226 Z" fill="#ffffff" opacity="0.95" />
+    <!-- Right Page -->
+    <path d="M256 296 C296 270 352 268 384 274 L384 206 C348 200 292 204 256 226 Z" fill="#f1f5f9" opacity="0.95" />
+    <!-- Spine Accent -->
+    <path d="M252 220 L260 220 L260 300 L252 300 Z" fill="url(#primaryGrad)" />
+
+    <!-- Graduation Cap (Mortarboard) -->
+    <polygon points="256,120 376,168 256,216 136,168" fill="url(#primaryGrad)" />
+    <!-- Cap Underneath Base -->
+    <path d="M184 190 L184 220 Q256 250 328 220 L328 190 Q256 214 184 190 Z" fill="#4338ca" />
+    <!-- Golden Tassel & Victory Star -->
+    <circle cx="256" cy="168" r="8" fill="url(#accentGrad)" />
+    <path d="M256 168 C290 178 308 198 312 216" stroke="url(#accentGrad)" stroke-width="5" fill="none" stroke-linecap="round" />
+    <circle cx="312" cy="218" r="7" fill="url(#accentGrad)" />
+  </g>
+
+  <!-- Brand Lettermark Badge -->
+  <rect x="180" y="396" width="152" height="38" rx="19" fill="#0f172a" stroke="rgba(255,255,255,0.2)" stroke-width="1.5" />
+  <text x="256" y="421" font-family="system-ui, -apple-system, sans-serif" font-size="16" font-weight="800" fill="#38bdf8" text-anchor="middle" letter-spacing="3">PARIKSHA</text>
+</svg>

@@ -1,0 +1,16 @@
+{
+	"appId": "com.parikshasetu.app",
+	"appName": "ParikshaSetu",
+	"webDir": "dist",
+	"server": {
+		"androidScheme": "https",
+		"cleartext": false
+	},
+	"plugins": {
+		"StatusBar": {
+			"style": "DARK",
+			"backgroundColor": "#1e293b"
+		},
+		"App": {}
+	}
+}

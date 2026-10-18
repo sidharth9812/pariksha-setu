@@ -1,6 +1,0 @@
-{
-  "summary":  "Comprehensive implementation plan for adding option image upload and rendering (A, B, C, D) alongside text in ParikshaSetu Admin Question Manager and Student CBT Test Screen. Ensures strict backward compatibility, Cloudinary integration, and zero disturbance to scoring or exam workflows.",
-  "updatedAt":  "2026-10-11T15:10:32.851748967Z",
-  "requestFeedback":  true,
-  "userFacing":  true
-}

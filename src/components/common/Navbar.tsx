@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useInstitute } from '../../context/InstituteContext';
+import { PWAInstallButton } from '../PWAInstallButton';
 
 interface NavbarProps {
   currentView: string;
@@ -91,6 +92,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, onNavigate, onOpenJ
             </div>
 
             {/* Quick action buttons */}
+            <PWAInstallButton />
             <button
               onClick={onOpenJoinModal}
               className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-medium text-xs sm:text-sm shadow-xs transition-colors cursor-pointer"
@@ -155,6 +157,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, onNavigate, onOpenJ
 
           {/* Mobile menu hamburger */}
           <div className="flex items-center gap-2 md:hidden">
+            <PWAInstallButton />
             <button
               onClick={onOpenJoinModal}
               className="p-2 rounded-lg bg-indigo-50 text-indigo-700 font-medium text-xs flex items-center gap-1 cursor-pointer"

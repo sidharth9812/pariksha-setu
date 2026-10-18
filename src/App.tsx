@@ -26,6 +26,8 @@ import { TestItem, StudentAttempt, UserRole } from './types/exam';
 import { getTestByAccessCode, joinExamSession, findStudentAttempt } from './services/examService';
 import { recordUserExamJoin } from './services/authService';
 import { getTestScheduleInfo } from './utils/scheduleHelper';
+import { initializeNativeApp } from './services/nativeAppService';
+import { OfflineIndicator } from './components/PWAInstallButton';
 
 function MainApp() {
   const { user, role, loading } = useAuth();
@@ -49,6 +51,11 @@ function MainApp() {
   const [selectedSeriesFilterForTests, setSelectedSeriesFilterForTests] = useState<string | undefined>();
   const [selectedTestIdForResults, setSelectedTestIdForResults] = useState<string | undefined>();
   const [urlExamCode, setUrlExamCode] = useState<string>('');
+
+  // Initialize native platform features (Capacitor status bar & hardware back button)
+  useEffect(() => {
+    initializeNativeApp();
+  }, []);
 
   // Check URL parameters for direct exam link (e.g. ?exam=MPP2026 or ?test=... or hash)
   useEffect(() => {
@@ -568,6 +575,7 @@ export default function App() {
     <AuthProvider>
       <InstituteProvider>
         <MainApp />
+        <OfflineIndicator />
       </InstituteProvider>
     </AuthProvider>
   );
