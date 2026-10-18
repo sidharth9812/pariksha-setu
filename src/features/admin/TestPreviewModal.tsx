@@ -81,42 +81,70 @@ export const TestPreviewModal: React.FC<TestPreviewModalProps> = ({ test, onClos
                 {currentQ.questionText}
               </div>
 
+              {(currentQ.questionImageUrl || currentQ.imageUrl) && (
+                <div className="pt-2 max-w-sm rounded-xl overflow-hidden border border-slate-200 bg-white">
+                  <img
+                    src={currentQ.questionImageUrl || currentQ.imageUrl}
+                    alt="Diagram"
+                    className="w-full h-auto max-h-48 object-contain"
+                  />
+                </div>
+              )}
+
               {/* Options with Admin Correct Answer Glow */}
               <div className="space-y-2.5 pt-2">
                 {(['A', 'B', 'C', 'D'] as const).map((key) => {
                   const isCorrect = currentQ.correctAnswer === key;
+                  const optImg = currentQ.optionImages?.[key];
+                  const optEng = currentQ.options?.[key];
+                  const optHi = currentQ.optionsHindi?.[key];
                   return (
                     <div
                       key={key}
-                      className={`p-3 rounded-xl border flex items-center justify-between text-xs sm:text-sm ${
+                      className={`p-3 rounded-xl border flex flex-col justify-between gap-2 text-xs sm:text-sm ${
                         isCorrect
                           ? 'border-emerald-500 bg-emerald-50 text-emerald-950 font-semibold ring-2 ring-emerald-400/30'
                           : 'border-slate-200 bg-slate-50/60 text-slate-700'
                       }`}
                     >
-                      <div className="flex items-center gap-2.5">
-                        <span
-                          className={`w-6 h-6 rounded-full flex items-center justify-center font-bold text-xs ${
-                            isCorrect ? 'bg-emerald-600 text-white' : 'bg-slate-200 text-slate-700'
-                          }`}
-                        >
-                          {key}
-                        </span>
-                        {currentQ.options?.[key] && currentQ.optionsHindi?.[key] && currentQ.options[key].trim() !== currentQ.optionsHindi[key].trim() ? (
-                          <span className="inline-flex items-center gap-1.5 flex-wrap">
-                            <span className="font-semibold text-slate-900">{currentQ.options[key]}</span>
-                            <span className="text-slate-400 font-bold">/</span>
-                            <span className="text-slate-700">{currentQ.optionsHindi[key]}</span>
+                      <div className="flex items-start justify-between gap-2.5">
+                        <div className="flex items-start gap-2.5">
+                          <span
+                            className={`w-6 h-6 rounded-full flex items-center justify-center font-bold text-xs shrink-0 ${
+                              isCorrect ? 'bg-emerald-600 text-white' : 'bg-slate-200 text-slate-700'
+                            }`}
+                          >
+                            {key}
                           </span>
-                        ) : (
-                          <span>{currentQ.options?.[key] || currentQ.optionsHindi?.[key] || ''}</span>
+                          {optEng && optHi && optEng.trim() !== optHi.trim() ? (
+                            <span className="inline-flex items-center gap-1.5 flex-wrap">
+                              <span className="font-semibold text-slate-900">{optEng}</span>
+                              <span className="text-slate-400 font-bold">/</span>
+                              <span className="text-slate-700">{optHi}</span>
+                            </span>
+                          ) : optEng || optHi ? (
+                            <span>{optEng || optHi}</span>
+                          ) : (
+                            <span className="italic text-slate-400">[Image Option]</span>
+                          )}
+                        </div>
+
+                        {isCorrect && (
+                          <span className="text-[10px] uppercase font-bold text-emerald-700 bg-emerald-200/80 px-2 py-0.5 rounded-full shrink-0">
+                            Correct Answer
+                          </span>
                         )}
                       </div>
 
-                      {isCorrect && (
-                        <span className="text-[10px] uppercase font-bold text-emerald-700 bg-emerald-200/80 px-2 py-0.5 rounded-full">
-                          Correct Answer
-                        </span>
+                      {optImg?.imageUrl && (
+                        <div className="ml-8 mt-1 max-w-sm rounded-lg overflow-hidden border border-slate-200 bg-white p-1">
+                          <img
+                            src={optImg.imageUrl}
+                            alt={`Option ${key}`}
+                            className="max-h-36 w-auto object-contain rounded"
+                            loading="lazy"
+                          />
+                        </div>
                       )}
                     </div>
                   );

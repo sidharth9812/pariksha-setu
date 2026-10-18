@@ -13,6 +13,7 @@ import {
   Menu,
   X,
   ExternalLink,
+  Video,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useInstitute } from '../../context/InstituteContext';
@@ -40,6 +41,7 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({
     { id: 'tests', label: 'Tests Management', icon: FileCheck2 },
     { id: 'live', label: 'Live Exams', icon: Radio, badge: 'Real-time' },
     { id: 'results', label: 'Results & Merit', icon: Award },
+    { id: 'courses', label: 'Courses & Videos', icon: Video, badge: 'Cloudinary' },
     { id: 'students', label: 'Students', icon: Users },
     { id: 'settings', label: 'Settings & Branding', icon: Settings },
   ];

@@ -41,6 +41,17 @@ export const LoginView: React.FC<LoginViewProps> = ({ onSuccess, onOpenDirectExa
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+
+  const clearFieldError = (fieldName: string) => {
+    setFieldErrors((prev) => {
+      if (!prev[fieldName]) return prev;
+      const next = { ...prev };
+      delete next[fieldName];
+      return next;
+    });
+    setError(null);
+  };
 
   // Student Sign In / Sign Up state
   const [name, setName] = useState('');
@@ -73,6 +84,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ onSuccess, onOpenDirectExa
   const handleStudentSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+    setFieldErrors({});
     setSuccessMessage(null);
 
     if (authMode === 'signup') {
@@ -80,29 +92,42 @@ export const LoginView: React.FC<LoginViewProps> = ({ onSuccess, onOpenDirectExa
       const cleanPhone = phone.trim();
       const cleanEmail = email.trim();
       const cleanPass = password.trim();
+      const cleanConfirm = confirmPassword.trim();
+      const newErrors: Record<string, string> = {};
 
       if (!cleanName) {
-        setError('Please enter your Full Name');
-        return;
+        newErrors.name = 'Please enter your Full Name';
+      } else if (cleanName.length < 2) {
+        newErrors.name = 'Full Name must be at least 2 characters';
       }
+
       if (!cleanPhone && !cleanEmail) {
-        setError('Please enter your 10-digit Mobile Number or Email Address');
-        return;
+        newErrors.phone = 'Please enter your 10-digit Mobile Number or Email Address';
+        newErrors.email = 'Please enter your 10-digit Mobile Number or Email Address';
+      } else {
+        if (cleanPhone && cleanPhone.length !== 10) {
+          newErrors.phone = 'Please enter a valid 10-digit Indian Mobile Number';
+        }
+        if (cleanEmail && (!cleanEmail.includes('@') || !cleanEmail.includes('.'))) {
+          newErrors.email = 'Please enter a valid Email Address';
+        }
       }
-      if (cleanPhone && cleanPhone.length !== 10) {
-        setError('Please enter a valid 10-digit Indian Mobile Number');
-        return;
+
+      if (!cleanPass) {
+        newErrors.password = 'Password must be at least 6 characters';
+      } else if (cleanPass.length < 6) {
+        newErrors.password = 'Password must be at least 6 characters';
       }
-      if (cleanEmail && (!cleanEmail.includes('@') || !cleanEmail.includes('.'))) {
-        setError('Please enter a valid Email Address');
-        return;
+
+      if (!cleanConfirm) {
+        newErrors.confirmPassword = 'Passwords do not match';
+      } else if (cleanPass !== cleanConfirm) {
+        newErrors.confirmPassword = 'Passwords do not match';
       }
-      if (cleanPass.length < 6) {
-        setError('Password must be at least 6 characters');
-        return;
-      }
-      if (cleanPass !== confirmPassword.trim()) {
-        setError('Passwords do not match');
+
+      if (Object.keys(newErrors).length > 0) {
+        setFieldErrors(newErrors);
+        setError(Object.values(newErrors)[0]);
         return;
       }
 
@@ -115,26 +140,50 @@ export const LoginView: React.FC<LoginViewProps> = ({ onSuccess, onOpenDirectExa
           password: cleanPass,
           role: 'student',
         });
-        setSuccessMessage('Registration successful. You can now login.');
+        setSuccessMessage('Registration successful! Please sign in with your credentials.');
         setAuthMode('signin');
         setLoginIdentifier(cleanEmail || cleanPhone);
         setPassword('');
         setConfirmPassword('');
       } catch (err: any) {
-        setError(err.message || 'Registration failed. Please check your details.');
+        const msg = err.message || 'Registration failed. Please check your details.';
+        setError(msg);
+        if (msg.includes('Email already') || msg.includes('email already')) {
+          setFieldErrors({ email: msg });
+        } else if (msg.includes('Mobile') || msg.includes('mobile')) {
+          setFieldErrors({ phone: msg });
+        } else if (msg.includes('Password') || msg.includes('password')) {
+          setFieldErrors({ password: msg });
+        }
       } finally {
         setLoading(false);
       }
     } else if (authMode === 'signin') {
       const cleanIdent = loginIdentifier.trim();
       const cleanPass = password.trim();
+      const newErrors: Record<string, string> = {};
 
       if (!cleanIdent) {
-        setError('Please enter your 10-digit Mobile Number or Email Address');
-        return;
+        newErrors.loginIdentifier = 'Please enter your 10-digit Mobile Number or Email Address';
+      } else {
+        const isEmailLike = cleanIdent.includes('@');
+        const digitsOnly = cleanIdent.replace(/\D/g, '');
+        if (isEmailLike) {
+          if (!cleanIdent.includes('.') || cleanIdent.length < 5) {
+            newErrors.loginIdentifier = 'Please enter a valid Email Address';
+          }
+        } else if (digitsOnly.length !== 10) {
+          newErrors.loginIdentifier = 'Please enter a valid 10-digit Mobile Number or Email Address';
+        }
       }
+
       if (!cleanPass) {
-        setError('Please enter your password');
+        newErrors.password = 'Please enter your password';
+      }
+
+      if (Object.keys(newErrors).length > 0) {
+        setFieldErrors(newErrors);
+        setError(Object.values(newErrors)[0]);
         return;
       }
 
@@ -143,7 +192,13 @@ export const LoginView: React.FC<LoginViewProps> = ({ onSuccess, onOpenDirectExa
         await signIn(cleanIdent, cleanPass, 'student');
         onSuccess();
       } catch (err: any) {
-        setError(err.message || 'Email/Mobile or password is incorrect');
+        const msg = err.message || 'Email/Mobile or password is incorrect';
+        setError(msg);
+        if (msg.includes('password') || msg.includes('Password')) {
+          setFieldErrors({ password: msg });
+        } else if (msg.includes('not registered') || msg.includes('Not registered') || msg.includes('Account not found')) {
+          setFieldErrors({ loginIdentifier: msg });
+        }
       } finally {
         setLoading(false);
       }
@@ -154,15 +209,18 @@ export const LoginView: React.FC<LoginViewProps> = ({ onSuccess, onOpenDirectExa
   const handleForgotStep1Submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+    setFieldErrors({});
     setSuccessMessage(null);
 
     const cleanInput = forgotIdentifier.trim();
     if (!cleanInput) {
+      setFieldErrors({ forgotEmail: 'Please enter your registered email address' });
       setError('Please enter your registered email address');
       return;
     }
 
     if (!cleanInput.includes('@') || !cleanInput.includes('.')) {
+      setFieldErrors({ forgotEmail: 'Please enter a valid registered email address (e.g. student@gmail.com)' });
       setError('Please enter a valid registered email address (e.g. student@gmail.com). Password recovery is available only via email.');
       return;
     }
@@ -177,7 +235,9 @@ export const LoginView: React.FC<LoginViewProps> = ({ onSuccess, onOpenDirectExa
       setForgotStep(2);
       setSuccessMessage(`Account verified for ${res.name}. Verification code has been generated.`);
     } catch (err: any) {
-      setError(err.message || 'Account not found. Please check your registered email address.');
+      const msg = err.message || 'Account not found. Please check your registered email address.';
+      setError(msg);
+      setFieldErrors({ forgotEmail: msg });
     } finally {
       setLoading(false);
     }
@@ -187,10 +247,12 @@ export const LoginView: React.FC<LoginViewProps> = ({ onSuccess, onOpenDirectExa
   const handleForgotStep2Submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+    setFieldErrors({});
     setSuccessMessage(null);
 
     const cleanCode = enteredOtp.trim();
     if (!cleanCode || cleanCode.length < 4) {
+      setFieldErrors({ otp: 'Please enter the 6-digit verification code' });
       setError('Please enter the 6-digit verification code');
       return;
     }
@@ -207,7 +269,9 @@ export const LoginView: React.FC<LoginViewProps> = ({ onSuccess, onOpenDirectExa
       setForgotStep(3);
       setSuccessMessage('Code verified successfully! Now set your new password.');
     } catch (err: any) {
-      setError(err.message || 'Invalid verification code. Please check and try again.');
+      const msg = err.message || 'Invalid verification code. Please check and try again.';
+      setError(msg);
+      setFieldErrors({ otp: msg });
     } finally {
       setLoading(false);
     }
@@ -217,17 +281,31 @@ export const LoginView: React.FC<LoginViewProps> = ({ onSuccess, onOpenDirectExa
   const handleForgotStep3Submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+    setFieldErrors({});
     setSuccessMessage(null);
 
     const cleanPass = newPassword.trim();
-    if (!cleanPass || cleanPass.length < 6) {
-      setError('Password must be at least 6 characters');
+    const cleanConfirm = confirmNewPassword.trim();
+    const newErrors: Record<string, string> = {};
+
+    if (!cleanPass) {
+      newErrors.newPassword = 'Password must be at least 6 characters';
+    } else if (cleanPass.length < 6) {
+      newErrors.newPassword = 'Password must be at least 6 characters';
+    }
+
+    if (!cleanConfirm) {
+      newErrors.confirmNewPassword = 'Passwords do not match';
+    } else if (cleanPass !== cleanConfirm) {
+      newErrors.confirmNewPassword = 'Passwords do not match';
+    }
+
+    if (Object.keys(newErrors).length > 0) {
+      setFieldErrors(newErrors);
+      setError(Object.values(newErrors)[0]);
       return;
     }
-    if (cleanPass !== confirmNewPassword.trim()) {
-      setError('Passwords do not match');
-      return;
-    }
+
     if (!resetUserId) {
       setError('Session expired. Please start over.');
       setForgotStep(1);
@@ -249,6 +327,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ onSuccess, onOpenDirectExa
   // FORGOT PASSWORD - STEP 4: Login immediately with the new password
   const handleLoginWithNewPassword = async () => {
     setError(null);
+    setFieldErrors({});
     setLoading(true);
     try {
       await signIn(forgotIdentifier.trim(), newPassword.trim(), 'student');
@@ -267,14 +346,43 @@ export const LoginView: React.FC<LoginViewProps> = ({ onSuccess, onOpenDirectExa
   const handleAdminSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+    setFieldErrors({});
     setSuccessMessage(null);
-    setLoading(true);
 
+    const cleanAdminEmail = adminEmail.trim();
+    const cleanAdminPass = adminPassword.trim();
+    const newErrors: Record<string, string> = {};
+
+    if (!cleanAdminEmail) {
+      newErrors.adminEmail = 'Please enter your Admin Email Address';
+    } else if (!cleanAdminEmail.includes('@') || !cleanAdminEmail.includes('.')) {
+      newErrors.adminEmail = 'Please enter a valid Admin Email Address';
+    }
+
+    if (!cleanAdminPass) {
+      newErrors.adminPassword = 'Please enter your Admin Password';
+    } else if (cleanAdminPass.length < 6) {
+      newErrors.adminPassword = 'Password must be at least 6 characters';
+    }
+
+    if (Object.keys(newErrors).length > 0) {
+      setFieldErrors(newErrors);
+      setError(Object.values(newErrors)[0]);
+      return;
+    }
+
+    setLoading(true);
     try {
-      await signIn(adminEmail.trim(), adminPassword.trim(), 'admin');
+      await signIn(cleanAdminEmail, cleanAdminPass, 'admin');
       onSuccess();
     } catch (err: any) {
-      setError(err.message || 'Admin email or password is incorrect');
+      const msg = err.message || 'Admin email or password is incorrect';
+      setError(msg);
+      if (msg.includes('password') || msg.includes('Password')) {
+        setFieldErrors({ adminPassword: msg });
+      } else {
+        setFieldErrors({ adminEmail: msg });
+      }
     } finally {
       setLoading(false);
     }
@@ -338,6 +446,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ onSuccess, onOpenDirectExa
             onClick={() => {
               setActiveTab('student');
               setError(null);
+              setFieldErrors({});
             }}
             className={`flex-1 py-2.5 rounded-lg text-sm font-semibold transition-all flex items-center justify-center gap-2 cursor-pointer ${
               activeTab === 'student'
@@ -353,6 +462,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ onSuccess, onOpenDirectExa
             onClick={() => {
               setActiveTab('admin');
               setError(null);
+              setFieldErrors({});
             }}
             className={`flex-1 py-2.5 rounded-lg text-sm font-semibold transition-all flex items-center justify-center gap-2 cursor-pointer ${
               activeTab === 'admin'
@@ -383,6 +493,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ onSuccess, onOpenDirectExa
                       if (email) setLoginIdentifier(email);
                       else if (phone) setLoginIdentifier(phone);
                       setError(null);
+                      setFieldErrors({});
                     }}
                     className="text-xs font-bold text-indigo-700 underline hover:text-indigo-900 cursor-pointer"
                   >
@@ -404,6 +515,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ onSuccess, onOpenDirectExa
                         setEmail(forgotIdentifier);
                       }
                       setError(null);
+                      setFieldErrors({});
                     }}
                     className="text-xs font-bold text-indigo-700 underline hover:text-indigo-900 cursor-pointer"
                   >
@@ -433,6 +545,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ onSuccess, onOpenDirectExa
                       onClick={() => {
                         setAuthMode('signin');
                         setError(null);
+                        setFieldErrors({});
                         setSuccessMessage(null);
                       }}
                       className={`py-2.5 px-3 rounded-lg flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
@@ -450,6 +563,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ onSuccess, onOpenDirectExa
                       onClick={() => {
                         setAuthMode('signup');
                         setError(null);
+                        setFieldErrors({});
                         setSuccessMessage(null);
                       }}
                       className={`py-2.5 px-3 rounded-lg flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
@@ -476,7 +590,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ onSuccess, onOpenDirectExa
                   </div>
 
                   {/* Student Form */}
-                  <form onSubmit={handleStudentSubmit} className="space-y-4">
+                  <form noValidate onSubmit={handleStudentSubmit} className="space-y-4">
                     {/* Full Name field (Only in Sign Up mode) */}
                     {authMode === 'signup' && (
                       <div>
@@ -487,13 +601,25 @@ export const LoginView: React.FC<LoginViewProps> = ({ onSuccess, onOpenDirectExa
                           <User className="w-4 h-4 text-slate-400 absolute left-3 top-3.5" />
                           <input
                             type="text"
-                            required
                             placeholder="e.g. Rahul Sharma"
                             value={name}
-                            onChange={(e) => setName(e.target.value)}
-                            className="w-full pl-9 pr-3 py-2.5 border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none bg-white"
+                            onChange={(e) => {
+                              setName(e.target.value);
+                              clearFieldError('name');
+                            }}
+                            className={`w-full pl-9 pr-3 py-2.5 border rounded-xl text-sm focus:ring-2 outline-none transition-colors ${
+                              fieldErrors.name
+                                ? 'border-red-500 bg-red-50/20 focus:ring-red-500 focus:border-red-500'
+                                : 'border-slate-300 focus:ring-indigo-500 focus:border-indigo-500 bg-white'
+                            }`}
                           />
                         </div>
+                        {fieldErrors.name && (
+                          <p className="text-xs text-red-600 mt-1 font-medium flex items-center gap-1">
+                            <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                            <span>{fieldErrors.name}</span>
+                          </p>
+                        )}
                       </div>
                     )}
 
@@ -517,14 +643,28 @@ export const LoginView: React.FC<LoginViewProps> = ({ onSuccess, onOpenDirectExa
                                 maxLength={10}
                                 placeholder="9826012345"
                                 value={phone}
-                                onChange={(e) => setPhone(e.target.value.replace(/\D/g, ''))}
-                                className="w-full pl-9 pr-3 py-2.5 border border-slate-300 rounded-r-xl text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none bg-white font-medium tracking-wide"
+                                onChange={(e) => {
+                                  setPhone(e.target.value.replace(/\D/g, ''));
+                                  clearFieldError('phone');
+                                }}
+                                className={`w-full pl-9 pr-3 py-2.5 border rounded-r-xl text-sm focus:ring-2 outline-none font-medium tracking-wide transition-colors ${
+                                  fieldErrors.phone
+                                    ? 'border-red-500 bg-red-50/20 focus:ring-red-500 focus:border-red-500'
+                                    : 'border-slate-300 focus:ring-indigo-500 focus:border-indigo-500 bg-white'
+                                }`}
                               />
                             </div>
                           </div>
-                          <p className="text-[11px] text-slate-400 mt-1">
-                            Provide your 10-digit mobile number or email address (at least one is required).
-                          </p>
+                          {fieldErrors.phone ? (
+                            <p className="text-xs text-red-600 mt-1 font-medium flex items-center gap-1">
+                              <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                              <span>{fieldErrors.phone}</span>
+                            </p>
+                          ) : (
+                            <p className="text-[11px] text-slate-400 mt-1">
+                              Provide your 10-digit mobile number or email address (at least one is required).
+                            </p>
+                          )}
                         </div>
 
                         {/* Email Address */}
@@ -538,13 +678,26 @@ export const LoginView: React.FC<LoginViewProps> = ({ onSuccess, onOpenDirectExa
                           <div className="relative">
                             <Mail className="w-4 h-4 text-slate-400 absolute left-3 top-3.5" />
                             <input
-                              type="email"
+                              type="text"
                               placeholder="e.g. rahul@gmail.com"
                               value={email}
-                              onChange={(e) => setEmail(e.target.value)}
-                              className="w-full pl-9 pr-3 py-2.5 border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none bg-white"
+                              onChange={(e) => {
+                                setEmail(e.target.value);
+                                clearFieldError('email');
+                              }}
+                              className={`w-full pl-9 pr-3 py-2.5 border rounded-xl text-sm focus:ring-2 outline-none transition-colors ${
+                                fieldErrors.email
+                                  ? 'border-red-500 bg-red-50/20 focus:ring-red-500 focus:border-red-500'
+                                  : 'border-slate-300 focus:ring-indigo-500 focus:border-indigo-500 bg-white'
+                              }`}
                             />
                           </div>
+                          {fieldErrors.email && (
+                            <p className="text-xs text-red-600 mt-1 font-medium flex items-center gap-1">
+                              <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                              <span>{fieldErrors.email}</span>
+                            </p>
+                          )}
                         </div>
                       </>
                     ) : (
@@ -557,16 +710,29 @@ export const LoginView: React.FC<LoginViewProps> = ({ onSuccess, onOpenDirectExa
                           <Phone className="w-4 h-4 text-slate-400 absolute left-3 top-3.5" />
                           <input
                             type="text"
-                            required
                             placeholder="e.g. 9826012345 or candidate@gmail.com"
                             value={loginIdentifier}
-                            onChange={(e) => setLoginIdentifier(e.target.value)}
-                            className="w-full pl-9 pr-3 py-2.5 border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none bg-white"
+                            onChange={(e) => {
+                              setLoginIdentifier(e.target.value);
+                              clearFieldError('loginIdentifier');
+                            }}
+                            className={`w-full pl-9 pr-3 py-2.5 border rounded-xl text-sm focus:ring-2 outline-none transition-colors ${
+                              fieldErrors.loginIdentifier
+                                ? 'border-red-500 bg-red-50/20 focus:ring-red-500 focus:border-red-500'
+                                : 'border-slate-300 focus:ring-indigo-500 focus:border-indigo-500 bg-white'
+                            }`}
                           />
                         </div>
-                        <p className="text-[11px] text-slate-400 mt-1">
-                          Enter your registered 10-digit mobile number or email address.
-                        </p>
+                        {fieldErrors.loginIdentifier ? (
+                          <p className="text-xs text-red-600 mt-1 font-medium flex items-center gap-1">
+                            <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                            <span>{fieldErrors.loginIdentifier}</span>
+                          </p>
+                        ) : (
+                          <p className="text-[11px] text-slate-400 mt-1">
+                            Enter your registered 10-digit mobile number or email address.
+                          </p>
+                        )}
                       </div>
                     )}
 
@@ -584,6 +750,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ onSuccess, onOpenDirectExa
                               setForgotStep(1);
                               setForgotIdentifier(loginIdentifier.includes('@') ? loginIdentifier : '');
                               setError(null);
+                              setFieldErrors({});
                               setSuccessMessage(null);
                             }}
                             className="text-xs font-bold text-indigo-600 hover:text-indigo-800 cursor-pointer"
@@ -598,16 +765,21 @@ export const LoginView: React.FC<LoginViewProps> = ({ onSuccess, onOpenDirectExa
                         <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-3.5" />
                         <input
                           type={showPassword ? 'text' : 'password'}
-                          required
-                          minLength={6}
                           placeholder={
                             authMode === 'signup'
                               ? 'Create a secure password (min 6 characters)'
                               : 'Enter your password'
                           }
                           value={password}
-                          onChange={(e) => setPassword(e.target.value)}
-                          className="w-full pl-9 pr-10 py-2.5 border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none bg-white"
+                          onChange={(e) => {
+                            setPassword(e.target.value);
+                            clearFieldError('password');
+                          }}
+                          className={`w-full pl-9 pr-10 py-2.5 border rounded-xl text-sm focus:ring-2 outline-none transition-colors ${
+                            fieldErrors.password
+                              ? 'border-red-500 bg-red-50/20 focus:ring-red-500 focus:border-red-500'
+                              : 'border-slate-300 focus:ring-indigo-500 focus:border-indigo-500 bg-white'
+                          }`}
                         />
                         <button
                           type="button"
@@ -617,6 +789,12 @@ export const LoginView: React.FC<LoginViewProps> = ({ onSuccess, onOpenDirectExa
                           {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                         </button>
                       </div>
+                      {fieldErrors.password && (
+                        <p className="text-xs text-red-600 mt-1 font-medium flex items-center gap-1">
+                          <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                          <span>{fieldErrors.password}</span>
+                        </p>
+                      )}
                     </div>
 
                     {/* Confirm Password field (Only in Sign Up mode) */}
@@ -629,12 +807,17 @@ export const LoginView: React.FC<LoginViewProps> = ({ onSuccess, onOpenDirectExa
                           <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-3.5" />
                           <input
                             type={showConfirmPassword ? 'text' : 'password'}
-                            required
-                            minLength={6}
                             placeholder="Re-enter password"
                             value={confirmPassword}
-                            onChange={(e) => setConfirmPassword(e.target.value)}
-                            className="w-full pl-9 pr-10 py-2.5 border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none bg-white"
+                            onChange={(e) => {
+                              setConfirmPassword(e.target.value);
+                              clearFieldError('confirmPassword');
+                            }}
+                            className={`w-full pl-9 pr-10 py-2.5 border rounded-xl text-sm focus:ring-2 outline-none transition-colors ${
+                              fieldErrors.confirmPassword
+                                ? 'border-red-500 bg-red-50/20 focus:ring-red-500 focus:border-red-500'
+                                : 'border-slate-300 focus:ring-indigo-500 focus:border-indigo-500 bg-white'
+                            }`}
                           />
                           <button
                             type="button"
@@ -648,6 +831,12 @@ export const LoginView: React.FC<LoginViewProps> = ({ onSuccess, onOpenDirectExa
                             )}
                           </button>
                         </div>
+                        {fieldErrors.confirmPassword && (
+                          <p className="text-xs text-red-600 mt-1 font-medium flex items-center gap-1">
+                            <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                            <span>{fieldErrors.confirmPassword}</span>
+                          </p>
+                        )}
                       </div>
                     )}
 
@@ -732,7 +921,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ onSuccess, onOpenDirectExa
 
                   {/* STEP 1: Enter registered email only */}
                   {forgotStep === 1 && (
-                    <form onSubmit={handleForgotStep1Submit} className="space-y-4">
+                    <form noValidate onSubmit={handleForgotStep1Submit} className="space-y-4">
                       <div className="text-left space-y-1">
                         <div className="flex items-center gap-2">
                           <RotateCcw className="w-5 h-5 text-indigo-600" />
@@ -750,14 +939,26 @@ export const LoginView: React.FC<LoginViewProps> = ({ onSuccess, onOpenDirectExa
                         <div className="relative">
                           <Mail className="w-4 h-4 text-slate-400 absolute left-3 top-3.5" />
                           <input
-                            type="email"
-                            required
+                            type="text"
                             placeholder="e.g. student@gmail.com"
                             value={forgotIdentifier}
-                            onChange={(e) => setForgotIdentifier(e.target.value)}
-                            className="w-full pl-9 pr-3 py-2.5 border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none bg-white"
+                            onChange={(e) => {
+                              setForgotIdentifier(e.target.value);
+                              clearFieldError('forgotEmail');
+                            }}
+                            className={`w-full pl-9 pr-3 py-2.5 border rounded-xl text-sm focus:ring-2 outline-none transition-colors ${
+                              fieldErrors.forgotEmail
+                                ? 'border-red-500 bg-red-50/20 focus:ring-red-500 focus:border-red-500'
+                                : 'border-slate-300 focus:ring-indigo-500 focus:border-indigo-500 bg-white'
+                            }`}
                           />
                         </div>
+                        {fieldErrors.forgotEmail && (
+                          <p className="text-xs text-red-600 mt-1 font-medium flex items-center gap-1">
+                            <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                            <span>{fieldErrors.forgotEmail}</span>
+                          </p>
+                        )}
                       </div>
 
                       <button
@@ -773,7 +974,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ onSuccess, onOpenDirectExa
 
                   {/* STEP 2: Enter Verification Code */}
                   {forgotStep === 2 && (
-                    <form onSubmit={handleForgotStep2Submit} className="space-y-4">
+                    <form noValidate onSubmit={handleForgotStep2Submit} className="space-y-4">
                       <div className="text-left space-y-1">
                         <h3 className="text-base font-bold text-slate-900">Enter Verification Code</h3>
                         <p className="text-xs text-slate-500">
@@ -800,12 +1001,24 @@ export const LoginView: React.FC<LoginViewProps> = ({ onSuccess, onOpenDirectExa
                           type="text"
                           inputMode="numeric"
                           maxLength={6}
-                          required
                           placeholder="Enter 6-digit code"
                           value={enteredOtp}
-                          onChange={(e) => setEnteredOtp(e.target.value.replace(/\D/g, ''))}
-                          className="w-full px-3 py-2.5 border border-slate-300 rounded-xl text-center text-lg font-bold tracking-widest text-slate-900 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none bg-white font-mono"
+                          onChange={(e) => {
+                            setEnteredOtp(e.target.value.replace(/\D/g, ''));
+                            clearFieldError('otp');
+                          }}
+                          className={`w-full px-3 py-2.5 border rounded-xl text-center text-lg font-bold tracking-widest text-slate-900 focus:ring-2 outline-none font-mono transition-colors ${
+                            fieldErrors.otp
+                              ? 'border-red-500 bg-red-50/20 focus:ring-red-500 focus:border-red-500'
+                              : 'border-slate-300 focus:ring-indigo-500 focus:border-indigo-500 bg-white'
+                          }`}
                         />
+                        {fieldErrors.otp && (
+                          <p className="text-xs text-red-600 mt-1 font-medium flex items-center justify-center gap-1">
+                            <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                            <span>{fieldErrors.otp}</span>
+                          </p>
+                        )}
                       </div>
 
                       <div className="flex items-center gap-2">
@@ -814,6 +1027,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ onSuccess, onOpenDirectExa
                           onClick={() => {
                             setForgotStep(1);
                             setError(null);
+                            setFieldErrors({});
                           }}
                           className="w-1/3 py-2.5 px-3 border border-slate-300 text-slate-700 font-bold rounded-xl text-xs hover:bg-slate-50 cursor-pointer"
                         >
@@ -833,7 +1047,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ onSuccess, onOpenDirectExa
 
                   {/* STEP 3: Set New Password */}
                   {forgotStep === 3 && (
-                    <form onSubmit={handleForgotStep3Submit} className="space-y-4">
+                    <form noValidate onSubmit={handleForgotStep3Submit} className="space-y-4">
                       <div className="text-left space-y-1">
                         <h3 className="text-base font-bold text-slate-900">Set New Password</h3>
                         <p className="text-xs text-slate-500">
@@ -849,12 +1063,17 @@ export const LoginView: React.FC<LoginViewProps> = ({ onSuccess, onOpenDirectExa
                           <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-3.5" />
                           <input
                             type={showNewPassword ? 'text' : 'password'}
-                            required
-                            minLength={6}
                             placeholder="Enter new password (min 6 characters)"
                             value={newPassword}
-                            onChange={(e) => setNewPassword(e.target.value)}
-                            className="w-full pl-9 pr-10 py-2.5 border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none bg-white"
+                            onChange={(e) => {
+                              setNewPassword(e.target.value);
+                              clearFieldError('newPassword');
+                            }}
+                            className={`w-full pl-9 pr-10 py-2.5 border rounded-xl text-sm focus:ring-2 outline-none transition-colors ${
+                              fieldErrors.newPassword
+                                ? 'border-red-500 bg-red-50/20 focus:ring-red-500 focus:border-red-500'
+                                : 'border-slate-300 focus:ring-indigo-500 focus:border-indigo-500 bg-white'
+                            }`}
                           />
                           <button
                             type="button"
@@ -864,6 +1083,12 @@ export const LoginView: React.FC<LoginViewProps> = ({ onSuccess, onOpenDirectExa
                             {showNewPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                           </button>
                         </div>
+                        {fieldErrors.newPassword && (
+                          <p className="text-xs text-red-600 mt-1 font-medium flex items-center gap-1">
+                            <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                            <span>{fieldErrors.newPassword}</span>
+                          </p>
+                        )}
                       </div>
 
                       <div>
@@ -874,12 +1099,17 @@ export const LoginView: React.FC<LoginViewProps> = ({ onSuccess, onOpenDirectExa
                           <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-3.5" />
                           <input
                             type={showConfirmNewPassword ? 'text' : 'password'}
-                            required
-                            minLength={6}
                             placeholder="Re-enter new password"
                             value={confirmNewPassword}
-                            onChange={(e) => setConfirmNewPassword(e.target.value)}
-                            className="w-full pl-9 pr-10 py-2.5 border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none bg-white"
+                            onChange={(e) => {
+                              setConfirmNewPassword(e.target.value);
+                              clearFieldError('confirmNewPassword');
+                            }}
+                            className={`w-full pl-9 pr-10 py-2.5 border rounded-xl text-sm focus:ring-2 outline-none transition-colors ${
+                              fieldErrors.confirmNewPassword
+                                ? 'border-red-500 bg-red-50/20 focus:ring-red-500 focus:border-red-500'
+                                : 'border-slate-300 focus:ring-indigo-500 focus:border-indigo-500 bg-white'
+                            }`}
                           />
                           <button
                             type="button"
@@ -893,6 +1123,12 @@ export const LoginView: React.FC<LoginViewProps> = ({ onSuccess, onOpenDirectExa
                             )}
                           </button>
                         </div>
+                        {fieldErrors.confirmNewPassword && (
+                          <p className="text-xs text-red-600 mt-1 font-medium flex items-center gap-1">
+                            <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                            <span>{fieldErrors.confirmNewPassword}</span>
+                          </p>
+                        )}
                       </div>
 
                       <button
@@ -939,6 +1175,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ onSuccess, onOpenDirectExa
                             setLoginIdentifier(forgotIdentifier);
                             setPassword('');
                             setError(null);
+                            setFieldErrors({});
                             setSuccessMessage(null);
                           }}
                           className="w-full py-2 px-3 text-xs font-bold text-slate-600 hover:text-slate-900 cursor-pointer"
@@ -953,7 +1190,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ onSuccess, onOpenDirectExa
             </div>
           ) : (
             /* ADMIN TAB */
-            <form onSubmit={handleAdminSubmit} className="space-y-4">
+            <form noValidate onSubmit={handleAdminSubmit} className="space-y-4">
               <div className="text-left space-y-0.5">
                 <div className="flex items-center gap-1.5">
                   <Shield className="w-5 h-5 text-indigo-600" />
@@ -973,14 +1210,26 @@ export const LoginView: React.FC<LoginViewProps> = ({ onSuccess, onOpenDirectExa
                 <div className="relative">
                   <Mail className="w-4 h-4 text-slate-400 absolute left-3 top-3.5" />
                   <input
-                    type="email"
-                    required
+                    type="text"
                     value={adminEmail}
-                    onChange={(e) => setAdminEmail(e.target.value)}
+                    onChange={(e) => {
+                      setAdminEmail(e.target.value);
+                      clearFieldError('adminEmail');
+                    }}
                     placeholder="admin@institute.edu"
-                    className="w-full pl-9 pr-3 py-2.5 border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none bg-white"
+                    className={`w-full pl-9 pr-3 py-2.5 border rounded-xl text-sm focus:ring-2 outline-none transition-colors ${
+                      fieldErrors.adminEmail
+                        ? 'border-red-500 bg-red-50/20 focus:ring-red-500 focus:border-red-500'
+                        : 'border-slate-300 focus:ring-indigo-500 focus:border-indigo-500 bg-white'
+                    }`}
                   />
                 </div>
+                {fieldErrors.adminEmail && (
+                  <p className="text-xs text-red-600 mt-1 font-medium flex items-center gap-1">
+                    <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                    <span>{fieldErrors.adminEmail}</span>
+                  </p>
+                )}
               </div>
 
               <div>
@@ -991,11 +1240,17 @@ export const LoginView: React.FC<LoginViewProps> = ({ onSuccess, onOpenDirectExa
                   <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-3.5" />
                   <input
                     type={showPassword ? 'text' : 'password'}
-                    required
                     value={adminPassword}
-                    onChange={(e) => setAdminPassword(e.target.value)}
+                    onChange={(e) => {
+                      setAdminPassword(e.target.value);
+                      clearFieldError('adminPassword');
+                    }}
                     placeholder="Enter admin password"
-                    className="w-full pl-9 pr-10 py-2.5 border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none bg-white"
+                    className={`w-full pl-9 pr-10 py-2.5 border rounded-xl text-sm focus:ring-2 outline-none transition-colors ${
+                      fieldErrors.adminPassword
+                        ? 'border-red-500 bg-red-50/20 focus:ring-red-500 focus:border-red-500'
+                        : 'border-slate-300 focus:ring-indigo-500 focus:border-indigo-500 bg-white'
+                    }`}
                   />
                   <button
                     type="button"
@@ -1005,6 +1260,12 @@ export const LoginView: React.FC<LoginViewProps> = ({ onSuccess, onOpenDirectExa
                     {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                   </button>
                 </div>
+                {fieldErrors.adminPassword && (
+                  <p className="text-xs text-red-600 mt-1 font-medium flex items-center gap-1">
+                    <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                    <span>{fieldErrors.adminPassword}</span>
+                  </p>
+                )}
               </div>
 
               <button

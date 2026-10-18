@@ -74,18 +74,18 @@ export async function verifyPassword(password: string, salt: string, hash: strin
 
 /**
  * Normalizes an Indian 10-digit mobile number, stripping spaces, dashes, +91, 91, or 0 prefixes.
- * Returns exactly 10 digits starting with 6-9, or null if invalid.
+ * Returns exactly 10 digits, or null if invalid.
  */
 export function normalizePhone(raw: string): string | null {
   if (!raw) return null;
   const digits = raw.replace(/\D/g, '');
-  if (digits.length === 10 && /^[6-9]/.test(digits)) {
+  if (digits.length === 10) {
     return digits;
   }
-  if (digits.length === 11 && digits.startsWith('0') && /^[6-9]/.test(digits.slice(1))) {
+  if (digits.length === 11 && digits.startsWith('0')) {
     return digits.slice(1);
   }
-  if (digits.length === 12 && digits.startsWith('91') && /^[6-9]/.test(digits.slice(2))) {
+  if (digits.length === 12 && digits.startsWith('91')) {
     return digits.slice(2);
   }
   return null;
@@ -343,6 +343,14 @@ export async function signInUser(
   const cleanEmail = email || (cleanInput.includes('@') ? cleanInput.toLowerCase() : null);
   const { email: authEmailFromIdent } = normalizeAuthIdentifier(cleanInput);
 
+  // If input format is neither valid 10-digit phone nor valid email
+  if (!phone && !cleanEmail) {
+    if (explicitRole === 'admin') {
+      throw new Error('Please enter a valid Admin Email Address');
+    }
+    throw new Error('Please enter a valid 10-digit Mobile Number or Email Address');
+  }
+
   // 1. First, search for user document in Firestore by phone or email
   let matchedDoc: any = null;
   let matchedDocId: string | null = null;
@@ -411,7 +419,7 @@ export async function signInUser(
       }
 
       // Password matches! Determine role and build profile
-      let role: UserRole = matchedDoc.role || explicitRole || 'student';
+      let role: UserRole = matchedDoc.role || 'student';
       const docEmailLower = (matchedDoc.email || '').toLowerCase();
       if (
         docEmailLower === BOOTSTRAP_ADMIN_EMAIL.toLowerCase() ||
@@ -419,6 +427,10 @@ export async function signInUser(
         docEmailLower.includes('admin')
       ) {
         role = 'admin';
+      }
+
+      if (explicitRole === 'admin' && role !== 'admin') {
+        throw new Error('Access denied. This account does not have administrator privileges.');
       }
 
       const profile: UserProfile = {
@@ -429,6 +441,9 @@ export async function signInUser(
         authEmail: matchedDoc.authEmail || matchedDoc.email,
         phone: matchedDoc.phone || phone || undefined,
         role,
+        photoUrl: matchedDoc.profileImageUrl || matchedDoc.photoUrl || undefined,
+        profileImageUrl: matchedDoc.profileImageUrl || undefined,
+        profileImagePublicId: matchedDoc.profileImagePublicId || undefined,
         isBlocked: !!matchedDoc.isBlocked,
         createdAt: matchedDoc.createdAt || now,
         lastLogin: now,
@@ -589,7 +604,9 @@ export async function signInUser(
         throw new Error('Too many attempts. Please try again after 1 minute');
       }
       // If user does not exist in Firestore and Firebase Auth sign in failed with invalid credential:
-      // STRICT REQUIREMENT: "Email not registered. Please sign up first."
+      if (explicitRole === 'admin') {
+        throw new Error('Admin account not found. Please check your credentials.');
+      }
       if (isEmail) {
         throw new Error('Email not registered. Please sign up first.');
       } else {
@@ -599,6 +616,9 @@ export async function signInUser(
   }
 
   // Account does not exist in the system
+  if (explicitRole === 'admin') {
+    throw new Error('Admin account not found. Please check your credentials.');
+  }
   if (isEmail) {
     throw new Error('Email not registered. Please sign up first.');
   }
@@ -1181,7 +1201,9 @@ export async function getAllRegisteredUsers(): Promise<UserProfile[]> {
           totalExamsJoined: data.totalExamsJoined !== undefined ? data.totalExamsJoined : joinedExams.length,
           totalExamsSubmitted: data.totalExamsSubmitted || 0,
           joinedExams: joinedExams,
-          photoUrl: data.photoUrl,
+          photoUrl: data.profileImageUrl || data.photoUrl || undefined,
+          profileImageUrl: data.profileImageUrl || undefined,
+          profileImagePublicId: data.profileImagePublicId || undefined,
         } as UserProfile;
       });
     }

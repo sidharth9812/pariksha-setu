@@ -44,6 +44,7 @@ interface AuthContextType {
   }>;
   verifyResetCode: (userId: string, code: string) => Promise<boolean>;
   resetUserPassword: (userId: string, newPassword: string) => Promise<{ success: boolean; message: string }>;
+  updateUserProfileState: (updates: Partial<UserProfile>) => void;
   switchRoleForTesting?: (newRole: UserRole) => void;
 }
 
@@ -128,6 +129,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  const updateUserProfileState = (updates: Partial<UserProfile>) => {
+    if (user) {
+      const updated: UserProfile = { ...user, ...updates };
+      setUser(updated);
+      try {
+        localStorage.setItem('pariksha_current_user', JSON.stringify(updated));
+      } catch {
+        // ignore
+      }
+    }
+  };
+
   const switchRoleForTesting = (newRole: UserRole) => {
     if (user) {
       const updated: UserProfile = { ...user, role: newRole };
@@ -148,6 +161,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         findUserForPasswordReset,
         verifyResetCode,
         resetUserPassword,
+        updateUserProfileState,
         switchRoleForTesting,
       }}
     >

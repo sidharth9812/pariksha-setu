@@ -12,8 +12,9 @@ import {
   Download,
   Copy,
   Languages,
+  Image as ImageIcon,
 } from 'lucide-react';
-import { TestItem, QuestionItem } from '../../types/exam';
+import { TestItem, QuestionItem, OptionImageData } from '../../types/exam';
 import {
   getQuestionsForTest,
   createQuestion,
@@ -21,7 +22,10 @@ import {
   deleteQuestion,
   bulkImportQuestions,
 } from '../../services/examService';
-import { uploadQuestionImage } from '../../services/storageService';
+import {
+  uploadQuestionImageToCloudinary,
+  uploadOptionImageToCloudinary,
+} from '../../services/cloudinaryService';
 import { DualLanguageBulkCsvModal } from './DualLanguageBulkCsvModal';
 
 interface QuestionManagerProps {
@@ -47,13 +51,25 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({ test, onBack }
   const [optBHindi, setOptBHindi] = useState('');
   const [optCHindi, setOptCHindi] = useState('');
   const [optDHindi, setOptDHindi] = useState('');
+  const [optionImages, setOptionImages] = useState<{
+    A?: OptionImageData;
+    B?: OptionImageData;
+    C?: OptionImageData;
+    D?: OptionImageData;
+  }>({});
+  const [uploadingOptionKey, setUploadingOptionKey] = useState<string | null>(null);
+  const [optionUploadProgress, setOptionUploadProgress] = useState<Record<string, number>>({});
+  const [formValidationError, setFormValidationError] = useState<string | null>(null);
   const [correctAnswer, setCorrectAnswer] = useState<'A' | 'B' | 'C' | 'D'>('A');
   const [explanation, setExplanation] = useState('');
   const [explanationHindi, setExplanationHindi] = useState('');
   const [subject, setSubject] = useState('General');
   const [imageUrl, setImageUrl] = useState('');
+  const [questionImageUrl, setQuestionImageUrl] = useState('');
+  const [questionImagePublicId, setQuestionImagePublicId] = useState('');
   const [isUploadingImage, setIsUploadingImage] = useState(false);
   const [imageUploadProgress, setImageUploadProgress] = useState(0);
+  const [mediaError, setMediaError] = useState<string | null>(null);
 
   const loadQuestions = async () => {
     setLoading(true);
@@ -83,11 +99,18 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({ test, onBack }
     setOptBHindi('');
     setOptCHindi('');
     setOptDHindi('');
+    setOptionImages({});
+    setUploadingOptionKey(null);
+    setOptionUploadProgress({});
+    setFormValidationError(null);
     setCorrectAnswer('A');
     setExplanation('');
     setExplanationHindi('');
     setSubject('General');
     setImageUrl('');
+    setQuestionImageUrl('');
+    setQuestionImagePublicId('');
+    setMediaError(null);
     setIsAddModalOpen(true);
   };
 
@@ -103,11 +126,28 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({ test, onBack }
     setOptBHindi(q.optionsHindi?.B || '');
     setOptCHindi(q.optionsHindi?.C || '');
     setOptDHindi(q.optionsHindi?.D || '');
+    setOptionImages(
+      q.optionImages
+        ? {
+            A: q.optionImages.A,
+            B: q.optionImages.B,
+            C: q.optionImages.C,
+            D: q.optionImages.D,
+          }
+        : {}
+    );
+    setUploadingOptionKey(null);
+    setOptionUploadProgress({});
+    setFormValidationError(null);
     setCorrectAnswer(q.correctAnswer);
     setExplanation(q.explanation || '');
     setExplanationHindi(q.explanationHindi || '');
     setSubject(q.subject || 'General');
-    setImageUrl(q.imageUrl || '');
+    const existingImg = q.questionImageUrl || q.imageUrl || '';
+    setImageUrl(existingImg);
+    setQuestionImageUrl(existingImg);
+    setQuestionImagePublicId(q.questionImagePublicId || '');
+    setMediaError(null);
     setIsAddModalOpen(true);
   };
 
@@ -117,21 +157,97 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({ test, onBack }
 
     setIsUploadingImage(true);
     setImageUploadProgress(0);
+    setMediaError(null);
     try {
-      const url = await uploadQuestionImage(test.id, file, (progress) => {
+      const res = await uploadQuestionImageToCloudinary(file, (progress) => {
         setImageUploadProgress(progress);
       });
-      setImageUrl(url);
+      setQuestionImageUrl(res.secure_url);
+      setQuestionImagePublicId(res.public_id);
+      setImageUrl(res.secure_url); // For backwards compatibility
     } catch (err: any) {
-      alert(err.message || 'Failed to upload question image to Firebase Storage.');
+      console.error('Question image upload error:', err);
+      setMediaError('Media upload failed. Please try again.');
     } finally {
       setIsUploadingImage(false);
     }
   };
 
+  const handleRemoveImage = () => {
+    setImageUrl('');
+    setQuestionImageUrl('');
+    setQuestionImagePublicId('');
+    setMediaError(null);
+  };
+
+  const handleOptionImageUpload = async (key: 'A' | 'B' | 'C' | 'D', e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setUploadingOptionKey(key);
+    setOptionUploadProgress((prev) => ({ ...prev, [key]: 0 }));
+    setFormValidationError(null);
+    try {
+      const res = await uploadOptionImageToCloudinary(file, (progress) => {
+        setOptionUploadProgress((prev) => ({ ...prev, [key]: progress }));
+      });
+      setOptionImages((prev) => ({
+        ...prev,
+        [key]: {
+          imageUrl: res.secure_url,
+          imagePublicId: res.public_id,
+        },
+      }));
+    } catch (err: any) {
+      console.error(`Option ${key} image upload error:`, err);
+      setFormValidationError(`Failed to upload image for Option ${key}. Please try again.`);
+    } finally {
+      setUploadingOptionKey(null);
+    }
+  };
+
+  const handleRemoveOptionImage = (key: 'A' | 'B' | 'C' | 'D') => {
+    setOptionImages((prev) => {
+      const updated = { ...prev };
+      delete updated[key];
+      return updated;
+    });
+    setFormValidationError(null);
+  };
+
   const handleSaveQuestion = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!questionText.trim()) return;
+    setFormValidationError(null);
+
+    if (!questionText.trim()) {
+      setFormValidationError('Question text is required.');
+      return;
+    }
+
+    // Validation: Each option (A, B, C, D) must have text OR an image (cannot be completely empty)
+    const optionValues = {
+      A: { text: optA.trim() || optAHindi.trim(), hasImg: Boolean(optionImages.A?.imageUrl) },
+      B: { text: optB.trim() || optBHindi.trim(), hasImg: Boolean(optionImages.B?.imageUrl) },
+      C: { text: optC.trim() || optCHindi.trim(), hasImg: Boolean(optionImages.C?.imageUrl) },
+      D: { text: optD.trim() || optDHindi.trim(), hasImg: Boolean(optionImages.D?.imageUrl) },
+    };
+
+    for (const key of ['A', 'B', 'C', 'D'] as const) {
+      if (!optionValues[key].text && !optionValues[key].hasImg) {
+        setFormValidationError(
+          `Option ${key} cannot be empty. Please provide text, upload an image, or both.`
+        );
+        return;
+      }
+    }
+
+    const finalImageUrl = questionImageUrl || imageUrl || undefined;
+    const cleanedOptionImages: { [key: string]: OptionImageData } = {};
+    (['A', 'B', 'C', 'D'] as const).forEach((key) => {
+      if (optionImages[key]?.imageUrl) {
+        cleanedOptionImages[key] = optionImages[key]!;
+      }
+    });
 
     const payload: Partial<QuestionItem> = {
       testId: test.id,
@@ -153,21 +269,33 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({ test, onBack }
               D: optDHindi.trim(),
             }
           : undefined,
+      optionImages: Object.keys(cleanedOptionImages).length > 0 ? cleanedOptionImages : undefined,
       correctAnswer,
       explanation: explanation.trim() || undefined,
       explanationHindi: explanationHindi.trim() || undefined,
       subject: subject.trim() || 'General',
-      imageUrl: imageUrl || undefined,
+      questionImageUrl: questionImageUrl || undefined,
+      questionImagePublicId: questionImagePublicId || undefined,
+      imageUrl: finalImageUrl,
     };
 
-    if (editingQuestion) {
-      await updateQuestion(test.id, editingQuestion.id, payload);
-    } else {
-      await createQuestion(payload);
-    }
+    try {
+      if (editingQuestion) {
+        await updateQuestion(test.id, editingQuestion.id, payload);
+      } else {
+        await createQuestion(payload);
+      }
 
-    setIsAddModalOpen(false);
-    await loadQuestions();
+      setIsAddModalOpen(false);
+      await loadQuestions();
+    } catch (err: any) {
+      console.error('Save question error:', err);
+      if (questionImageUrl || Object.keys(cleanedOptionImages).length > 0) {
+        alert('Media uploaded, but saving the data failed. Please try again.');
+      } else {
+        alert(err.message || 'Failed to save question.');
+      }
+    }
   };
 
   const handleDeleteQuestion = async (q: QuestionItem) => {
@@ -259,9 +387,13 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({ test, onBack }
                   )}
                   <div className="text-xs sm:text-sm text-slate-700 leading-snug">{q.questionText}</div>
 
-                  {q.imageUrl && (
+                  {(q.questionImageUrl || q.imageUrl) && (
                     <div className="mt-2 max-w-sm rounded-xl overflow-hidden border border-slate-200">
-                      <img src={q.imageUrl} alt="Question diagram" className="w-full h-auto max-h-48 object-contain bg-white" />
+                      <img
+                        src={q.questionImageUrl || q.imageUrl}
+                        alt="Question diagram"
+                        className="w-full h-auto max-h-48 object-contain bg-white"
+                      />
                     </div>
                   )}
                 </div>
@@ -286,31 +418,49 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({ test, onBack }
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1 text-xs">
                 {(['A', 'B', 'C', 'D'] as const).map((key) => {
                   const isCorrect = q.correctAnswer === key;
+                  const optImg = q.optionImages?.[key];
+                  const optEng = q.options?.[key];
+                  const optHi = q.optionsHindi?.[key];
                   return (
                     <div
                       key={key}
-                      className={`p-2.5 rounded-xl border flex items-center justify-between gap-2 ${
+                      className={`p-2.5 rounded-xl border flex flex-col justify-between gap-1.5 ${
                         isCorrect
                           ? 'border-emerald-300 bg-emerald-50 text-emerald-900 font-semibold'
                           : 'border-slate-200 bg-slate-50 text-slate-700'
                       }`}
                     >
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="font-bold">{key}.</span>
-                        {q.options?.[key] && q.optionsHindi?.[key] && q.options[key].trim() !== q.optionsHindi[key].trim() ? (
-                          <span className="inline-flex items-center gap-1.5 flex-wrap">
-                            <span className="font-semibold text-slate-900">{q.options[key]}</span>
-                            <span className="text-slate-400 font-bold">/</span>
-                            <span className="text-slate-700">{q.optionsHindi[key]}</span>
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex items-start gap-2 flex-wrap">
+                          <span className="font-bold shrink-0">{key}.</span>
+                          {optEng && optHi && optEng.trim() !== optHi.trim() ? (
+                            <span className="inline-flex items-center gap-1.5 flex-wrap">
+                              <span className="font-semibold text-slate-900">{optEng}</span>
+                              <span className="text-slate-400 font-bold">/</span>
+                              <span className="text-slate-700">{optHi}</span>
+                            </span>
+                          ) : optEng || optHi ? (
+                            <span>{optEng || optHi}</span>
+                          ) : (
+                            <span className="italic text-slate-400">[Image Option]</span>
+                          )}
+                        </div>
+                        {isCorrect && (
+                          <span className="text-[10px] uppercase font-bold text-emerald-700 bg-emerald-100 px-1.5 py-0.5 rounded shrink-0">
+                            Answer
                           </span>
-                        ) : (
-                          <span>{q.options?.[key] || q.optionsHindi?.[key] || ''}</span>
                         )}
                       </div>
-                      {isCorrect && (
-                        <span className="text-[10px] uppercase font-bold text-emerald-700 bg-emerald-100 px-1.5 py-0.5 rounded">
-                          Answer
-                        </span>
+
+                      {optImg?.imageUrl && (
+                        <div className="mt-1 max-w-[160px] rounded-lg overflow-hidden border border-slate-200 bg-white p-1">
+                          <img
+                            src={optImg.imageUrl}
+                            alt={`Option ${key}`}
+                            className="max-h-20 w-auto object-contain rounded"
+                            loading="lazy"
+                          />
+                        </div>
                       )}
                     </div>
                   );
@@ -370,90 +520,143 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({ test, onBack }
 
               {/* Options */}
               <div className="space-y-3 pt-2">
-                <span className="block text-xs font-bold text-slate-700 uppercase tracking-wider">
-                  Options (A, B, C, D) *
-                </span>
+                <div className="flex items-center justify-between">
+                  <span className="block text-xs font-bold text-slate-700 uppercase tracking-wider">
+                    Options (A, B, C, D) *
+                  </span>
+                  <span className="text-[11px] text-slate-500 font-medium">
+                    Each option requires text, image, or both
+                  </span>
+                </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div>
-                    <label className="text-xs font-semibold text-slate-600 block mb-0.5">Option A (Primary)</label>
-                    <input
-                      type="text"
-                      required
-                      value={optA}
-                      onChange={(e) => setOptA(e.target.value)}
-                      className="w-full px-3 py-2 border border-slate-300 rounded-xl text-xs outline-none"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-xs font-semibold text-slate-600 block mb-0.5">Option A (Secondary)</label>
-                    <input
-                      type="text"
-                      value={optAHindi}
-                      onChange={(e) => setOptAHindi(e.target.value)}
-                      className="w-full px-3 py-2 border border-slate-300 rounded-xl text-xs outline-none"
-                    />
-                  </div>
+                <div className="space-y-3">
+                  {[
+                    { key: 'A' as const, val: optA, setVal: setOptA, valHi: optAHindi, setValHi: setOptAHindi },
+                    { key: 'B' as const, val: optB, setVal: setOptB, valHi: optBHindi, setValHi: setOptBHindi },
+                    { key: 'C' as const, val: optC, setVal: setOptC, valHi: optCHindi, setValHi: setOptCHindi },
+                    { key: 'D' as const, val: optD, setVal: setOptD, valHi: optDHindi, setValHi: setOptDHindi },
+                  ].map(({ key, val, setVal, valHi, setValHi }) => {
+                    const optImg = optionImages[key];
+                    const isUploadingThis = uploadingOptionKey === key;
+                    const progress = optionUploadProgress[key] || 0;
 
-                  <div>
-                    <label className="text-xs font-semibold text-slate-600 block mb-0.5">Option B (Primary)</label>
-                    <input
-                      type="text"
-                      required
-                      value={optB}
-                      onChange={(e) => setOptB(e.target.value)}
-                      className="w-full px-3 py-2 border border-slate-300 rounded-xl text-xs outline-none"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-xs font-semibold text-slate-600 block mb-0.5">Option B (Secondary)</label>
-                    <input
-                      type="text"
-                      value={optBHindi}
-                      onChange={(e) => setOptBHindi(e.target.value)}
-                      className="w-full px-3 py-2 border border-slate-300 rounded-xl text-xs outline-none"
-                    />
-                  </div>
+                    return (
+                      <div
+                        key={key}
+                        className="p-3 bg-slate-50/70 rounded-xl border border-slate-200 space-y-2.5 transition-colors hover:border-slate-300"
+                      >
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <span className="w-6 h-6 rounded-lg bg-indigo-600 text-white font-bold text-xs flex items-center justify-center">
+                              {key}
+                            </span>
+                            <span className="text-xs font-bold text-slate-800">Option {key}</span>
+                          </div>
+                          {optImg?.imageUrl && (
+                            <span className="text-[10px] bg-indigo-100 text-indigo-700 font-semibold px-2 py-0.5 rounded-full flex items-center gap-1">
+                              <ImageIcon className="w-3 h-3" /> Image Added
+                            </span>
+                          )}
+                        </div>
 
-                  <div>
-                    <label className="text-xs font-semibold text-slate-600 block mb-0.5">Option C (Primary)</label>
-                    <input
-                      type="text"
-                      required
-                      value={optC}
-                      onChange={(e) => setOptC(e.target.value)}
-                      className="w-full px-3 py-2 border border-slate-300 rounded-xl text-xs outline-none"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-xs font-semibold text-slate-600 block mb-0.5">Option C (Secondary)</label>
-                    <input
-                      type="text"
-                      value={optCHindi}
-                      onChange={(e) => setOptCHindi(e.target.value)}
-                      className="w-full px-3 py-2 border border-slate-300 rounded-xl text-xs outline-none"
-                    />
-                  </div>
+                        {/* Text inputs for Option */}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                          <div>
+                            <label className="text-[11px] font-semibold text-slate-600 block mb-0.5">
+                              Text (Primary)
+                            </label>
+                            <input
+                              type="text"
+                              value={val}
+                              onChange={(e) => setVal(e.target.value)}
+                              placeholder={`Option ${key} text (optional if image added)`}
+                              className="w-full px-3 py-1.5 border border-slate-300 rounded-lg text-xs outline-none bg-white focus:ring-1 focus:ring-indigo-500"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-[11px] font-semibold text-slate-600 block mb-0.5">
+                              Text (Secondary / Hindi)
+                            </label>
+                            <input
+                              type="text"
+                              value={valHi}
+                              onChange={(e) => setValHi(e.target.value)}
+                              placeholder={`Option ${key} Hindi (optional)`}
+                              className="w-full px-3 py-1.5 border border-slate-300 rounded-lg text-xs outline-none bg-white focus:ring-1 focus:ring-indigo-500"
+                            />
+                          </div>
+                        </div>
 
-                  <div>
-                    <label className="text-xs font-semibold text-slate-600 block mb-0.5">Option D (Primary)</label>
-                    <input
-                      type="text"
-                      required
-                      value={optD}
-                      onChange={(e) => setOptD(e.target.value)}
-                      className="w-full px-3 py-2 border border-slate-300 rounded-xl text-xs outline-none"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-xs font-semibold text-slate-600 block mb-0.5">Option D (Secondary)</label>
-                    <input
-                      type="text"
-                      value={optDHindi}
-                      onChange={(e) => setOptDHindi(e.target.value)}
-                      className="w-full px-3 py-2 border border-slate-300 rounded-xl text-xs outline-none"
-                    />
-                  </div>
+                        {/* Option Image Upload & Preview Section */}
+                        <div className="pt-1.5 border-t border-slate-200/70">
+                          {optImg?.imageUrl ? (
+                            <div className="flex items-center justify-between gap-3 bg-white p-2 rounded-lg border border-slate-200">
+                              <div className="flex items-center gap-2.5 min-w-0">
+                                <div className="h-12 w-16 shrink-0 rounded border border-slate-200 bg-slate-50 p-0.5 flex items-center justify-center overflow-hidden">
+                                  <img
+                                    src={optImg.imageUrl}
+                                    alt={`Option ${key} preview`}
+                                    className="max-h-full max-w-full object-contain"
+                                  />
+                                </div>
+                                <div className="text-[11px] truncate">
+                                  <span className="font-semibold text-slate-800 block truncate">
+                                    Option {key} Image
+                                  </span>
+                                  <span className="text-emerald-600 text-[10px] font-medium">Uploaded to Cloudinary</span>
+                                </div>
+                              </div>
+
+                              <div className="flex items-center gap-1.5 shrink-0">
+                                <label className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-white rounded text-[11px] font-semibold flex items-center gap-1 cursor-pointer">
+                                  <Upload className="w-3 h-3" />
+                                  <span>{isUploadingThis ? `Uploading (${progress}%)...` : 'Change'}</span>
+                                  <input
+                                    type="file"
+                                    accept="image/*"
+                                    disabled={isUploadingThis}
+                                    onChange={(e) => handleOptionImageUpload(key, e)}
+                                    className="hidden"
+                                  />
+                                </label>
+                                <button
+                                  type="button"
+                                  onClick={() => handleRemoveOptionImage(key)}
+                                  className="px-2 py-1 text-red-600 hover:text-red-700 hover:bg-red-50 border border-red-200 rounded text-[11px] font-semibold cursor-pointer"
+                                >
+                                  Remove
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="flex items-center justify-between gap-2">
+                              <label className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-white hover:bg-slate-100 border border-slate-300 rounded-lg text-xs font-semibold text-slate-700 cursor-pointer shadow-2xs">
+                                <ImageIcon className="w-3.5 h-3.5 text-slate-500" />
+                                <span>{isUploadingThis ? `Uploading (${progress}%)...` : `Upload Option ${key} Image`}</span>
+                                <input
+                                  type="file"
+                                  accept="image/*"
+                                  disabled={isUploadingThis}
+                                  onChange={(e) => handleOptionImageUpload(key, e)}
+                                  className="hidden"
+                                />
+                              </label>
+                              <span className="text-[11px] text-slate-400">Optional image/formula for Option {key}</span>
+                            </div>
+                          )}
+
+                          {isUploadingThis && (
+                            <div className="w-full h-1 bg-slate-200 rounded-full overflow-hidden mt-1.5">
+                              <div
+                                className="h-full bg-indigo-600 transition-all duration-150"
+                                style={{ width: `${progress}%` }}
+                              />
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
 
@@ -506,33 +709,64 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({ test, onBack }
                 />
               </div>
 
-              {/* Diagram / Image Upload via Firebase Storage */}
+              {/* Diagram / Image Upload via Cloudinary */}
               <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-2">
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-bold text-slate-700 uppercase tracking-wider">
-                    Question Diagram / Image (Firebase Storage)
+                    Question Diagram / Image (Cloudinary)
                   </span>
-                  {imageUrl && (
+                  {(questionImageUrl || imageUrl) && (
                     <button
                       type="button"
-                      onClick={() => setImageUrl('')}
-                      className="text-xs text-red-600 font-semibold cursor-pointer"
+                      onClick={handleRemoveImage}
+                      className="text-xs text-red-600 font-semibold cursor-pointer hover:underline"
                     >
                       Remove
                     </button>
                   )}
                 </div>
 
-                {imageUrl && (
-                  <div className="max-w-xs rounded-lg overflow-hidden border border-slate-200">
-                    <img src={imageUrl} alt="Uploaded diagram" className="w-full h-auto max-h-36 object-contain bg-white" />
+                {mediaError && (
+                  <div className="p-2 rounded-lg bg-red-50 border border-red-200 text-red-700 text-xs font-medium">
+                    {mediaError}
+                  </div>
+                )}
+
+                {(questionImageUrl || imageUrl) && (
+                  <div className="max-w-xs rounded-lg overflow-hidden border border-slate-200 bg-white p-1">
+                    <img
+                      src={questionImageUrl || imageUrl}
+                      alt="Uploaded diagram"
+                      className="w-full h-auto max-h-36 object-contain bg-white"
+                    />
+                  </div>
+                )}
+
+                {isUploadingImage && (
+                  <div className="space-y-1">
+                    <div className="flex justify-between text-[11px] text-slate-500 font-semibold">
+                      <span>Uploading to Cloudinary...</span>
+                      <span>{imageUploadProgress}%</span>
+                    </div>
+                    <div className="w-full h-1.5 bg-slate-200 rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-indigo-600 rounded-full transition-all duration-150"
+                        style={{ width: `${imageUploadProgress}%` }}
+                      />
+                    </div>
                   </div>
                 )}
 
                 <div className="flex items-center gap-2">
                   <label className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-white rounded-lg text-xs font-semibold flex items-center gap-1 cursor-pointer">
                     <Upload className="w-3.5 h-3.5" />
-                    <span>{isUploadingImage ? `Uploading (${imageUploadProgress}%)...` : 'Upload Diagram / Image'}</span>
+                    <span>
+                      {isUploadingImage
+                        ? `Uploading (${imageUploadProgress}%)...`
+                        : (questionImageUrl || imageUrl)
+                        ? 'Replace Diagram'
+                        : 'Upload Diagram / Image'}
+                    </span>
                     <input
                       type="file"
                       disabled={isUploadingImage}
@@ -544,6 +778,13 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({ test, onBack }
                   <span className="text-[11px] text-slate-400">Optional diagram for reasoning / geometry / maps</span>
                 </div>
               </div>
+
+              {formValidationError && (
+                <div className="p-3 rounded-xl bg-amber-50 border border-amber-300 text-amber-900 text-xs font-semibold flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+                  <span>{formValidationError}</span>
+                </div>
+              )}
 
               <div className="flex items-center gap-3 pt-3 border-t border-slate-200">
                 <button

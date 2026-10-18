@@ -18,6 +18,7 @@ import { LiveExamMonitor } from './features/admin/LiveExamMonitor';
 import { ResultsDashboard } from './features/admin/ResultsDashboard';
 import { StudentManager } from './features/admin/StudentManager';
 import { SettingsManager } from './features/admin/SettingsManager';
+import { CourseVideoManager } from './features/admin/CourseVideoManager';
 import { TestPreviewModal } from './features/admin/TestPreviewModal';
 import { ReattemptInstructionsView } from './features/student/ReattemptInstructionsView';
 
@@ -476,6 +477,8 @@ function MainApp() {
             {adminTab === 'results' && (
               <ResultsDashboard initialTestId={selectedTestIdForResults} />
             )}
+
+            {adminTab === 'courses' && <CourseVideoManager />}
 
             {adminTab === 'students' && <StudentManager />}
 

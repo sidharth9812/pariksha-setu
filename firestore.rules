@@ -59,5 +59,11 @@ service cloud.firestore {
     match /settings/{settingId} {
       allow read, write, delete: if true;
     }
+
+    // Course Video Lectures & Materials (Firestore metadata pointing to Cloudinary media)
+    match /courses/{courseId} {
+      allow read, write, delete: if true;
+    }
   }
 }
+

@@ -613,12 +613,12 @@ export const LiveExamScreen: React.FC<LiveExamScreenProps> = ({
                 </div>
               )}
 
-              {/* Optional Question Diagram / Image from Firebase Storage */}
-              {currentQuestion.imageUrl && (
+              {/* Optional Question Diagram / Image from Cloudinary or Firebase */}
+              {(currentQuestion.questionImageUrl || currentQuestion.imageUrl) && (
                 <div className="pt-2">
                   <div className="max-w-md rounded-xl overflow-hidden border border-slate-200 shadow-xs bg-slate-50">
                     <img
-                      src={currentQuestion.imageUrl}
+                      src={currentQuestion.questionImageUrl || currentQuestion.imageUrl}
                       alt="Question Diagram"
                       className="w-full h-auto max-h-64 object-contain mx-auto bg-white"
                     />
@@ -630,9 +630,10 @@ export const LiveExamScreen: React.FC<LiveExamScreenProps> = ({
             {/* Multiple Choice Options */}
             <div className="px-4 sm:px-6 pb-6 space-y-3">
               {(['A', 'B', 'C', 'D'] as const).map((key) => {
-                const optEng = currentQuestion.options[key];
+                const optEng = currentQuestion.options?.[key];
                 const optHindi = currentQuestion.optionsHindi?.[key];
-                if (!optEng && !optHindi) return null;
+                const optImage = currentQuestion.optionImages?.[key];
+                if (!optEng && !optHindi && !optImage?.imageUrl) return null;
 
                 const isSelected = answers[currentQuestion.id] === key;
 
@@ -657,18 +658,33 @@ export const LiveExamScreen: React.FC<LiveExamScreenProps> = ({
                       {key}
                     </div>
 
-                    {/* Option Text */}
-                    <div className="flex-1 text-sm sm:text-base text-slate-800">
-                      {languageMode === 'both' && optEng && optHindi && optEng.trim() !== optHindi.trim() ? (
-                        <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
-                          <span className="font-semibold text-slate-900">{optEng}</span>
-                          <span className="text-slate-400 font-bold">/</span>
-                          <span className="font-medium text-slate-800">{optHindi}</span>
+                    {/* Option Content: Stacked with text above and image below */}
+                    <div className="flex-1 text-sm sm:text-base text-slate-800 space-y-2.5">
+                      {(optEng || optHindi) && (
+                        <div>
+                          {languageMode === 'both' && optEng && optHindi && optEng.trim() !== optHindi.trim() ? (
+                            <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+                              <span className="font-semibold text-slate-900">{optEng}</span>
+                              <span className="text-slate-400 font-bold">/</span>
+                              <span className="font-medium text-slate-800">{optHindi}</span>
+                            </div>
+                          ) : languageMode === 'hi' ? (
+                            <div className="font-medium text-slate-900">{optHindi || optEng}</div>
+                          ) : (
+                            <div className="font-medium text-slate-900">{optEng || optHindi}</div>
+                          )}
                         </div>
-                      ) : languageMode === 'hi' ? (
-                        <div className="font-medium text-slate-900">{optHindi || optEng}</div>
-                      ) : (
-                        <div className="font-medium text-slate-900">{optEng || optHindi}</div>
+                      )}
+
+                      {optImage?.imageUrl && (
+                        <div className="max-w-md rounded-xl overflow-hidden border border-slate-200 bg-white p-1.5 shadow-2xs">
+                          <img
+                            src={optImage.imageUrl}
+                            alt={`Option ${key} image`}
+                            className="w-auto h-auto max-h-52 object-contain rounded"
+                            loading="lazy"
+                          />
+                        </div>
                       )}
                     </div>
                   </div>

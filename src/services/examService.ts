@@ -772,6 +772,9 @@ export async function createQuestion(question: Partial<QuestionItem>): Promise<Q
     explanationHindi: question.explanationHindi || '',
     subject: question.subject || 'General Knowledge',
     imageUrl: question.imageUrl || null as any,
+    questionImageUrl: question.questionImageUrl || null as any,
+    questionImagePublicId: question.questionImagePublicId || null as any,
+    optionImages: question.optionImages || null as any,
     createdAt: new Date().toISOString(),
   };
 
@@ -846,6 +849,9 @@ export async function bulkImportQuestions(
       explanationHindi: q.explanationHindi || '',
       subject: q.subject || 'General',
       imageUrl: q.imageUrl || (null as any),
+      questionImageUrl: q.questionImageUrl || (null as any),
+      questionImagePublicId: q.questionImagePublicId || (null as any),
+      optionImages: q.optionImages || (null as any),
       createdAt: new Date().toISOString(),
     };
 

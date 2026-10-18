@@ -32,7 +32,7 @@ export const SettingsManager: React.FC = () => {
       });
       setLogoUrl(url);
     } catch (err: any) {
-      alert(err.message || 'Failed to upload logo to Firebase Storage.');
+      alert(err.message || 'Media upload failed. Please try again.');
     } finally {
       setIsUploadingLogo(false);
     }
@@ -88,12 +88,12 @@ export const SettingsManager: React.FC = () => {
             />
           </div>
 
-          {/* Firebase Storage Logo Upload */}
+          {/* Cloudinary Media Logo Upload */}
           <div className="sm:col-span-2 p-4 bg-slate-50 rounded-2xl border border-slate-200 space-y-3">
             <div className="flex items-center justify-between">
               <div>
                 <label className="block text-xs font-bold text-slate-800 uppercase tracking-wider">
-                  Institute Logo (Firebase Storage)
+                  Institute Logo (Cloudinary Media)
                 </label>
                 <p className="text-[11px] text-slate-500 mt-0.5">
                   Upload your academy logo or emblem. Supported formats: PNG, JPG, WebP, SVG (Max 5MB).

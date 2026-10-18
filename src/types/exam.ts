@@ -19,7 +19,9 @@ export interface UserProfile {
   authEmail?: string;
   phone?: string;
   role: UserRole;
-  photoUrl?: string;
+  photoUrl?: string; // Existing avatar URL (Firebase or other)
+  profileImageUrl?: string; // Cloudinary secure URL
+  profileImagePublicId?: string; // Cloudinary public_id
   isBlocked?: boolean;
   registrationType?: 'registered' | 'direct_exam_join' | 'guest';
   isRegistered?: boolean;
@@ -77,6 +79,11 @@ export interface TestItem {
   updatedAt?: string;
 }
 
+export interface OptionImageData {
+  imageUrl: string;
+  imagePublicId?: string;
+}
+
 export interface QuestionItem {
   id: string;
   testId: string;
@@ -95,12 +102,38 @@ export interface QuestionItem {
     C: string;
     D: string;
   };
+  optionImages?: {
+    A?: OptionImageData;
+    B?: OptionImageData;
+    C?: OptionImageData;
+    D?: OptionImageData;
+    [key: string]: OptionImageData | undefined;
+  };
   correctAnswer: 'A' | 'B' | 'C' | 'D';
   explanation?: string;
   explanationHindi?: string;
   subject?: string;
-  imageUrl?: string;
+  imageUrl?: string; // Existing diagram URL (Firebase or other)
+  questionImageUrl?: string; // Cloudinary secure URL
+  questionImagePublicId?: string; // Cloudinary public_id
   createdAt?: string;
+}
+
+export interface CourseItem {
+  id: string;
+  title: string;
+  description: string;
+  category: string; // e.g. MP Police, MP SI, SSC, General Studies, Reasoning, Mathematics
+  instructor?: string;
+  thumbnailUrl?: string; // Cloudinary course image secure_url
+  thumbnailPublicId?: string;
+  videoUrl?: string; // Cloudinary course video secure_url
+  videoPublicId?: string;
+  videoDuration?: number; // Video duration in seconds
+  videoFormat?: string; // e.g. mp4
+  status: 'published' | 'draft';
+  createdAt: string;
+  updatedAt?: string;
 }
 
 export type StudentExamStatus = 'waiting' | 'in_progress' | 'submitted' | 'auto_submitted';
