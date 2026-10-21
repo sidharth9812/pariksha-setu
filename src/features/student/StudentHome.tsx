@@ -41,8 +41,10 @@ import {
   Video,
   Play,
   Film,
+  HardDrive,
+  Download,
 } from 'lucide-react';
-import { TestItem, TestSeries, StudentAttempt, CourseItem } from '../../types/exam';
+import { TestItem, TestSeries, StudentAttempt, CourseItem, OfflineTestRecord, OfflineDownloadProgress } from '../../types/exam';
 import {
   getTests,
   getSeriesList,
@@ -58,6 +60,15 @@ import {
   getAllCoursesFromFirestore,
 } from '../../services/cloudinaryService';
 import { EnhancedVideoPlayer } from '../../components/common/EnhancedVideoPlayer';
+import { OfflinePracticeTab } from './OfflinePracticeTab';
+import {
+  getDownloadedTests,
+  downloadPracticeTestForOffline,
+  deleteDownloadedTest,
+  subscribeToDownloadProgress,
+  getPendingOfflineAttempts,
+  syncPendingOfflineAttempts,
+} from '../../services/offlineStorageService';
 
 interface StudentHomeProps {
   onSelectTest: (test: TestItem) => void;
@@ -71,6 +82,7 @@ interface StudentHomeProps {
 type StudentTab =
   | 'home'
   | 'exams'
+  | 'offline'
   | 'results'
   | 'performance'
   | 'material'
@@ -152,11 +164,33 @@ export const StudentHome: React.FC<StudentHomeProps> = ({
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(true);
+  const [downloadedTests, setDownloadedTests] = useState<OfflineTestRecord[]>([]);
+  const [pendingAttempts, setPendingAttempts] = useState<StudentAttempt[]>([]);
+  const [activeDownloadMap, setActiveDownloadMap] = useState<Record<string, OfflineDownloadProgress>>({});
+
+  const refreshOfflineRecords = async () => {
+    try {
+      const [dl, p] = await Promise.all([
+        getDownloadedTests(),
+        getPendingOfflineAttempts(),
+      ]);
+      setDownloadedTests(dl);
+      setPendingAttempts(p);
+    } catch {
+      // ignore
+    }
+  };
 
   // Online status monitoring
   useEffect(() => {
-    const handleOnline = () => setIsOnline(true);
-    const handleOffline = () => setIsOnline(false);
+    const handleOnline = () => {
+      setIsOnline(true);
+      refreshOfflineRecords();
+    };
+    const handleOffline = () => {
+      setIsOnline(false);
+      refreshOfflineRecords();
+    };
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
     return () => {
@@ -165,18 +199,84 @@ export const StudentHome: React.FC<StudentHomeProps> = ({
     };
   }, []);
 
+  // Offline download progress and custom event subscriptions
+  useEffect(() => {
+    const unsubProgress = subscribeToDownloadProgress((p) => {
+      setActiveDownloadMap((prev) => ({
+        ...prev,
+        [p.testId]: p,
+      }));
+      if (p.percent === 100) {
+        refreshOfflineRecords();
+      }
+    });
+
+    const onOfflineTests = () => refreshOfflineRecords();
+    const onOfflineAttempts = () => refreshOfflineRecords();
+
+    window.addEventListener('pariksha_offline_tests_updated', onOfflineTests);
+    window.addEventListener('pariksha_offline_attempts_changed', onOfflineAttempts);
+    window.addEventListener('pariksha_offline_attempts_synced', onOfflineAttempts);
+
+    return () => {
+      unsubProgress();
+      window.removeEventListener('pariksha_offline_tests_updated', onOfflineTests);
+      window.removeEventListener('pariksha_offline_attempts_changed', onOfflineAttempts);
+      window.removeEventListener('pariksha_offline_attempts_synced', onOfflineAttempts);
+    };
+  }, []);
+
+  const handleDownloadPracticeTest = async (testToDl: TestItem, e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    try {
+      await downloadPracticeTestForOffline(testToDl);
+      await refreshOfflineRecords();
+    } catch (err: any) {
+      console.warn('Practice test download error:', err);
+    }
+  };
+
   // Initial load
   useEffect(() => {
     async function loadData() {
       setLoading(true);
       try {
-        const [tList, sList, allAtt, cList] = await Promise.all([
+        const [tList, sList, allAtt, cList, dlTests, pAtts] = await Promise.all([
           getTests(),
           getSeriesList(),
           getAllAttempts(),
           getAllCoursesFromFirestore(),
+          getDownloadedTests(),
+          getPendingOfflineAttempts(),
         ]);
-        setTests(tList);
+        setDownloadedTests(dlTests);
+        setPendingAttempts(pAtts);
+
+        // If offline or tList is empty, supplement tList with downloaded tests
+        if (tList.length === 0 && dlTests.length > 0) {
+          const offlineConverted: TestItem[] = dlTests.map((dt) => ({
+            id: dt.id,
+            seriesId: '',
+            title: dt.title,
+            description: dt.instructions || '',
+            examCategory: dt.examCategory,
+            totalQuestions: dt.totalQuestions,
+            durationMinutes: dt.durationMinutes,
+            marksPerQuestion: dt.marksPerQuestion,
+            negativeMarks: dt.negativeMarks,
+            instantResult: true,
+            status: dt.status || 'released',
+            accessCode: dt.accessCode || '',
+            accessPassword: '',
+            instructions: dt.instructions,
+            syllabus: dt.syllabus,
+            createdAt: dt.downloadedAt,
+          }));
+          setTests(offlineConverted);
+        } else {
+          setTests(tList);
+        }
+
         setSeries(sList);
         setCourses(cList.filter((c) => c.status === 'published'));
 
@@ -303,6 +403,7 @@ export const StudentHome: React.FC<StudentHomeProps> = ({
   const navItems = [
     { id: 'home' as StudentTab, label: 'Home', icon: LayoutDashboard },
     { id: 'exams' as StudentTab, label: 'Examinations', icon: BookOpen, badge: availableTests.length > 0 ? `${availableTests.length}` : undefined },
+    { id: 'offline' as StudentTab, label: 'Offline Practice', icon: HardDrive, badge: downloadedTests.length > 0 ? `${downloadedTests.length}` : undefined },
     { id: 'results' as StudentTab, label: 'My Results', icon: Award, badge: myAttempts.length > 0 ? `${myAttempts.length}` : undefined },
     { id: 'performance' as StudentTab, label: 'Performance', icon: TrendingUp },
     { id: 'material' as StudentTab, label: 'Study Material', icon: GraduationCap },
@@ -318,6 +419,8 @@ export const StudentHome: React.FC<StudentHomeProps> = ({
         return { title: 'Student Dashboard', subtitle: 'Overview, quick metrics, and scheduled tests' };
       case 'exams':
         return { title: 'Available Examinations', subtitle: 'Scheduled examinations, competitive papers, and practice series' };
+      case 'offline':
+        return { title: 'Offline Practice Tests', subtitle: 'Manage downloaded practice tests and synchronized attempts' };
       case 'results':
         return { title: 'My Exam Results', subtitle: 'Submitted test evaluation history and scorecards' };
       case 'performance':
@@ -335,12 +438,15 @@ export const StudentHome: React.FC<StudentHomeProps> = ({
 
   const currentTabInfo = getTabTitle(activeTab);
 
-  // Render Test Action Button with full scheduling logic
+  // Render Test Action Button with full scheduling and offline logic
   const renderTestActionButton = (t: TestItem, schedule: TestScheduleInfo) => {
     const myAttemptsForThis = myAttempts.filter((a) => a.testId === t.id);
     const latestAttempt = myAttemptsForThis[0];
+    const isDownloaded = downloadedTests.some((d) => d.id === t.id);
+    const dlProgress = activeDownloadMap[t.id];
+    const isDownloading = dlProgress?.isDownloading;
 
-    // Case 1: Scheduled Test
+    // Case 1: Scheduled Official Test
     if (schedule.isScheduled) {
       if (schedule.scheduleStatus === 'upcoming') {
         return (
@@ -357,6 +463,20 @@ export const StudentHome: React.FC<StudentHomeProps> = ({
       }
 
       if (schedule.scheduleStatus === 'live') {
+        if (!isOnline) {
+          return (
+            <button
+              type="button"
+              disabled
+              className="w-full py-2.5 px-3 rounded-xl bg-slate-100 text-slate-500 font-bold text-xs flex items-center justify-center gap-1.5 cursor-not-allowed border border-slate-200"
+              title="Official live examinations require an active internet connection for anti-cheat verification and server-synchronized timers. Please connect to internet."
+            >
+              <WifiOff className="w-3.5 h-3.5 text-slate-400" />
+              <span>Live Exam • Connect to Internet</span>
+            </button>
+          );
+        }
+
         return (
           <button
             type="button"
@@ -364,7 +484,7 @@ export const StudentHome: React.FC<StudentHomeProps> = ({
             className="w-full py-2.5 px-3 rounded-xl bg-linear-to-r from-emerald-600 to-teal-700 hover:from-emerald-700 hover:to-teal-800 text-white font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer transition-all shadow-xs"
           >
             <PlayCircle className="w-4 h-4" />
-            <span>Start Test</span>
+            <span>Start Live Exam</span>
           </button>
         );
       }
@@ -400,19 +520,52 @@ export const StudentHome: React.FC<StudentHomeProps> = ({
       );
     }
 
-    // Case 2: Released Practice Test (Unlimited Reattempts)
+    // Case 2: Released Practice Test (Unlimited Reattempts & Downloadable)
     if (t.status === 'released') {
-      if (myAttemptsForThis.length > 0) {
-        return (
+      return (
+        <div className="space-y-2 w-full">
+          {/* Download status / button row */}
+          <div className="flex items-center justify-between text-[11px]">
+            {isDownloaded ? (
+              <span className="inline-flex items-center gap-1 text-emerald-700 font-bold">
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                <span>Available Offline</span>
+              </span>
+            ) : isDownloading ? (
+              <span className="text-indigo-600 font-bold flex items-center gap-1 animate-pulse">
+                <RotateCw className="w-3 h-3 animate-spin" />
+                <span>Downloading {dlProgress?.percent}%</span>
+              </span>
+            ) : isOnline ? (
+              <button
+                type="button"
+                onClick={(e) => handleDownloadPracticeTest(t, e)}
+                className="text-indigo-600 hover:text-indigo-800 font-bold flex items-center gap-1 cursor-pointer transition-colors"
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span>Download for Offline</span>
+              </button>
+            ) : null}
+          </div>
+
           <div className="flex items-center gap-2 w-full">
             <button
               type="button"
               onClick={() => (onReattemptTest ? onReattemptTest(t) : onSelectTest(t))}
               className="flex-1 py-2 px-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer transition-colors shadow-xs"
-              title="Reattempt this released test"
+              title="Start practice test"
             >
-              <RotateCw className="w-3.5 h-3.5" />
-              <span>Reattempt</span>
+              {myAttemptsForThis.length > 0 ? (
+                <>
+                  <RotateCw className="w-3.5 h-3.5" />
+                  <span>Reattempt</span>
+                </>
+              ) : (
+                <>
+                  <PlayCircle className="w-4 h-4" />
+                  <span>Start Practice</span>
+                </>
+              )}
             </button>
             {latestAttempt && (
               <button
@@ -426,44 +579,58 @@ export const StudentHome: React.FC<StudentHomeProps> = ({
               </button>
             )}
           </div>
-        );
-      }
-
-      return (
-        <button
-          type="button"
-          onClick={() => (onReattemptTest ? onReattemptTest(t) : onSelectTest(t))}
-          className="w-full py-2 px-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer transition-colors shadow-xs"
-        >
-          <PlayCircle className="w-4 h-4" />
-          <span>Start Test</span>
-        </button>
+        </div>
       );
     }
 
-    // Case 3: Standard Live/Published Test
-    if (latestAttempt) {
-      return (
-        <button
-          type="button"
-          onClick={() => onViewAttempt(latestAttempt)}
-          className="w-full py-2 px-3 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs flex items-center justify-center gap-1 cursor-pointer transition-colors shadow-xs"
-        >
-          <Award className="w-3.5 h-3.5" />
-          <span>View Result</span>
-        </button>
-      );
-    }
-
+    // Case 3: Standard Published Practice Test
     return (
-      <button
-        type="button"
-        onClick={() => onSelectTest(t)}
-        className="w-full py-2 px-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer transition-colors shadow-xs"
-      >
-        <PlayCircle className="w-4 h-4" />
-        <span>Start Test</span>
-      </button>
+      <div className="space-y-2 w-full">
+        <div className="flex items-center justify-between text-[11px]">
+          {isDownloaded ? (
+            <span className="inline-flex items-center gap-1 text-emerald-700 font-bold">
+              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+              <span>Available Offline</span>
+            </span>
+          ) : isDownloading ? (
+            <span className="text-indigo-600 font-bold flex items-center gap-1 animate-pulse">
+              <RotateCw className="w-3 h-3 animate-spin" />
+              <span>Downloading {dlProgress?.percent}%</span>
+            </span>
+          ) : isOnline ? (
+            <button
+              type="button"
+              onClick={(e) => handleDownloadPracticeTest(t, e)}
+              className="text-indigo-600 hover:text-indigo-800 font-bold flex items-center gap-1 cursor-pointer transition-colors"
+            >
+              <Download className="w-3.5 h-3.5" />
+              <span>Download for Offline</span>
+            </button>
+          ) : null}
+        </div>
+
+        <div className="flex items-center gap-2 w-full">
+          <button
+            type="button"
+            onClick={() => onSelectTest(t)}
+            className="flex-1 py-2 px-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer transition-colors shadow-xs"
+          >
+            <PlayCircle className="w-4 h-4" />
+            <span>Start Test</span>
+          </button>
+          {latestAttempt && (
+            <button
+              type="button"
+              onClick={() => onViewAttempt(latestAttempt)}
+              className="py-2 px-3 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 rounded-xl text-xs font-bold flex items-center justify-center gap-1 cursor-pointer transition-colors"
+              title="View past scorecard"
+            >
+              <Award className="w-3.5 h-3.5" />
+              <span>Result</span>
+            </button>
+          )}
+        </div>
+      </div>
     );
   };
 
@@ -1293,6 +1460,24 @@ export const StudentHome: React.FC<StudentHomeProps> = ({
                 )}
               </div>
             </div>
+          )}
+
+          {/* ========================================================
+              TAB: OFFLINE PRACTICE
+             ======================================================== */}
+          {activeTab === 'offline' && (
+            <OfflinePracticeTab
+              availableTests={availableTests}
+              onStartTest={(testToStart) => {
+                if (testToStart.status === 'released') {
+                  if (onReattemptTest) onReattemptTest(testToStart);
+                  else onSelectTest(testToStart);
+                } else {
+                  onSelectTest(testToStart);
+                }
+              }}
+              onViewAttempt={onViewAttempt}
+            />
           )}
 
           {/* ========================================================

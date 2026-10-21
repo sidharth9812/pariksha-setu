@@ -245,8 +245,9 @@ function MainApp() {
 
     setPendingReattemptTest(null);
 
-    // If test is already live, released, or confirmed reattempt, jump directly to live exam; otherwise go to waiting room
-    if (test.status === 'live' || test.status === 'released' || isConfirmedStart) {
+    // If test is already live, released, confirmed reattempt, or in offline practice mode, jump directly to live exam
+    const isOnline = typeof navigator !== 'undefined' ? navigator.onLine : true;
+    if (test.status === 'live' || test.status === 'released' || isConfirmedStart || !isOnline) {
       setCurrentView('live-exam');
     } else {
       setCurrentView('waiting-room');

@@ -156,6 +156,20 @@ export const AccessExamModal: React.FC<AccessExamModalProps> = ({
         return;
       }
 
+      // Check internet connectivity for live official exams
+      const isOnline = typeof navigator !== 'undefined' ? navigator.onLine : true;
+      if (!isOnline && targetTest.status !== 'released') {
+        const { isTestDownloaded } = await import('../../services/offlineStorageService');
+        const isDownloaded = await isTestDownloaded(targetTest.id);
+        if (!isDownloaded) {
+          setError(
+            'Official live examinations require an active internet connection for anti-cheat verification and server-synchronized timers. Please connect to the internet to join, or select a downloaded practice test.'
+          );
+          setLoading(false);
+          return;
+        }
+      }
+
       // 2. Verify password (only required for non-released exams)
       if (targetTest.status !== 'released') {
         const cleanInputPass = password.trim();

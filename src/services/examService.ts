@@ -270,7 +270,37 @@ export async function getTestById(testId: string): Promise<TestItem | null> {
   }
 
   const cached = getLocal<TestItem[]>(LOCAL_TESTS_KEY, []);
-  return cached.find((t) => t.id === testId) || null;
+  const found = cached.find((t) => t.id === testId);
+  if (found) return found;
+
+  // Check downloaded offline tests
+  try {
+    const { getDownloadedTests } = await import('./offlineStorageService');
+    const offlineList = await getDownloadedTests();
+    const match = offlineList.find((ot) => ot.id === testId);
+    if (match) {
+      return {
+        id: match.id,
+        seriesId: '',
+        title: match.title,
+        description: match.instructions || '',
+        examCategory: match.examCategory,
+        totalQuestions: match.totalQuestions,
+        durationMinutes: match.durationMinutes,
+        marksPerQuestion: match.marksPerQuestion,
+        negativeMarks: match.negativeMarks,
+        instantResult: true,
+        status: match.status || 'released',
+        accessCode: match.accessCode || '',
+        accessPassword: '',
+        instructions: match.instructions,
+        syllabus: match.syllabus,
+        createdAt: match.downloadedAt,
+      };
+    }
+  } catch {}
+
+  return null;
 }
 
 export async function getTestByAccessCode(accessCodeOrId: string): Promise<TestItem | null> {
@@ -351,7 +381,7 @@ export async function getTestByAccessCode(accessCodeOrId: string): Promise<TestI
     console.warn('Firestore full scan fallback:', err);
   }
 
-  // 4. Local storage fallback (and sync to Firestore if found)
+  // 4. Local storage fallback
   const cached = getLocal<TestItem[]>(LOCAL_TESTS_KEY, []);
   const cachedMatch = cached.find(matchesTest);
   if (cachedMatch) {
@@ -360,6 +390,36 @@ export async function getTestByAccessCode(accessCodeOrId: string): Promise<TestI
     } catch {}
     return cachedMatch;
   }
+
+  // 5. Offline downloaded tests fallback
+  try {
+    const { getDownloadedTests } = await import('./offlineStorageService');
+    const dl = await getDownloadedTests();
+    const match = dl.find((ot) => {
+      const code = (ot.accessCode || '').trim().toUpperCase();
+      return ot.id === clean || code === cleanUpper || code === clean;
+    });
+    if (match) {
+      return {
+        id: match.id,
+        seriesId: '',
+        title: match.title,
+        description: match.instructions || '',
+        examCategory: match.examCategory,
+        totalQuestions: match.totalQuestions,
+        durationMinutes: match.durationMinutes,
+        marksPerQuestion: match.marksPerQuestion,
+        negativeMarks: match.negativeMarks,
+        instantResult: true,
+        status: match.status || 'released',
+        accessCode: match.accessCode || '',
+        accessPassword: '',
+        instructions: match.instructions,
+        syllabus: match.syllabus,
+        createdAt: match.downloadedAt,
+      };
+    }
+  } catch {}
 
   return null;
 }
@@ -731,6 +791,16 @@ export async function getQuestionsForTest(testId: string, role: 'student' | 'adm
   if (questions.length === 0) {
     const localStore = getLocal<Record<string, QuestionItem[]>>(LOCAL_QUESTIONS_KEY, {});
     questions = localStore[testId] || [];
+  }
+
+  // If still empty, check downloaded offline practice tests in IndexedDB
+  if (questions.length === 0) {
+    try {
+      const { getDownloadedQuestions } = await import('./offlineStorageService');
+      questions = await getDownloadedQuestions(testId);
+    } catch {
+      // ignore
+    }
   }
 
   // Sort by questionNumber
@@ -1210,6 +1280,8 @@ export async function submitExamAttempt(params: {
 
   const now = new Date().toISOString();
 
+  const isOnline = typeof navigator !== 'undefined' ? navigator.onLine : true;
+
   const attempt: StudentAttempt = {
     id: attemptId,
     testId,
@@ -1237,6 +1309,9 @@ export async function submitExamAttempt(params: {
     status: isAutoSubmitted ? 'auto_submitted' : 'submitted',
     tabSwitchCount,
     activityLogs: activityLogs || [],
+    isOffline: !isOnline,
+    synced: isOnline,
+    syncedAt: isOnline ? now : undefined,
   };
 
   // 1. Save to local cache
@@ -1244,35 +1319,59 @@ export async function submitExamAttempt(params: {
   const filtered = attempts.filter((a) => a.id !== attemptId);
   setLocal(LOCAL_ATTEMPTS_KEY, [attempt, ...filtered]);
 
-  // 2. Save individual attempt to Cloud Firestore
-  try {
-    await setDoc(doc(db, 'attempts', attemptId), sanitizeForFirestore(attempt));
-    // For single-attempt exams, also update main pointer doc for fast lookup
-    if (!isReleasedTest && prevAttempts.length === 0) {
-      await setDoc(doc(db, 'attempts', `att-${testId}-${studentId}`), sanitizeForFirestore(attempt));
+  // 2. If offline, save into offlineStorageService for pending sync
+  if (!isOnline) {
+    try {
+      const { saveOfflineAttempt } = await import('./offlineStorageService');
+      await saveOfflineAttempt(attempt);
+    } catch (e) {
+      console.warn('Failed to save offline attempt:', e);
     }
-  } catch (err) {
-    console.warn('Firestore set attempt fallback:', err);
-  }
+  } else {
+    // Save individual attempt to Cloud Firestore
+    try {
+      await setDoc(doc(db, 'attempts', attemptId), sanitizeForFirestore(attempt));
+      // For single-attempt exams, also update main pointer doc for fast lookup
+      if (!isReleasedTest && prevAttempts.length === 0) {
+        await setDoc(doc(db, 'attempts', `att-${testId}-${studentId}`), sanitizeForFirestore(attempt));
+      }
+    } catch (err) {
+      console.warn('Firestore set attempt fallback (queueing offline):', err);
+      attempt.isOffline = true;
+      attempt.synced = false;
+      try {
+        const { saveOfflineAttempt } = await import('./offlineStorageService');
+        await saveOfflineAttempt(attempt);
+      } catch {}
+    }
 
-  // 3. Update user document in Firestore 'users' collection with submission status
-  try {
-    await recordUserExamSubmission({
-      userId: studentId,
-      testId,
-      finalScore,
-      percentage,
-    });
-  } catch (err) {
-    console.warn('Firestore recordUserExamSubmission warning:', err);
-  }
+    // 3. Update user document in Firestore 'users' collection with submission status
+    try {
+      await recordUserExamSubmission({
+        userId: studentId,
+        testId,
+        finalScore,
+        percentage,
+      });
+    } catch (err) {
+      console.warn('Firestore recordUserExamSubmission warning:', err);
+    }
 
-  // 4. Update session status
-  await updateSessionStatus(testId, studentId, isAutoSubmitted ? 'auto_submitted' : 'submitted', tabSwitchCount, {
-    timestamp: now,
-    event: isAutoSubmitted ? 'submitted_auto' : 'submitted_manual',
-    details: `Scored ${finalScore}/${maxPossibleMarks} (${percentage}%) - Attempt #${attemptNumber}`,
-  });
+    // 4. Update session status
+    try {
+      await updateSessionStatus(testId, studentId, isAutoSubmitted ? 'auto_submitted' : 'submitted', tabSwitchCount, {
+        timestamp: now,
+        event: isAutoSubmitted ? 'submitted_auto' : 'submitted_manual',
+        details: `Scored ${finalScore}/${maxPossibleMarks} (${percentage}%) - Attempt #${attemptNumber}`,
+      });
+    } catch {}
+
+    // Flush any pending offline attempts in background
+    try {
+      const { syncPendingOfflineAttempts } = await import('./offlineStorageService');
+      syncPendingOfflineAttempts().catch(() => {});
+    } catch {}
+  }
 
   broadcastEvent('ATTEMPT_SUBMITTED', attempt);
   return attempt;

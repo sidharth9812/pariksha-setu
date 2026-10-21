@@ -186,6 +186,36 @@ export interface StudentAttempt {
   status: 'submitted' | 'auto_submitted' | 'evaluated';
   tabSwitchCount: number;
   activityLogs?: ActivityLogEntry[];
+  isOffline?: boolean;
+  synced?: boolean;
+  syncedAt?: string;
+}
+
+export interface OfflineTestRecord {
+  id: string; // testId
+  title: string;
+  examCategory: string;
+  durationMinutes: number;
+  totalQuestions: number;
+  marksPerQuestion: number;
+  negativeMarks: number;
+  instructions?: string;
+  syllabus?: string;
+  accessCode?: string;
+  seriesTitle?: string;
+  downloadedAt: string;
+  questionsCount: number;
+  mediaCount: number;
+  approxSizeBytes?: number;
+  status: TestStatus;
+}
+
+export interface OfflineDownloadProgress {
+  testId: string;
+  isDownloading: boolean;
+  percent: number;
+  statusMessage: string;
+  error?: string | null;
 }
 
 export interface InstituteSettings {
@@ -201,3 +231,4 @@ export interface InstituteSettings {
 }
 
 export type QuestionNavStatus = 'answered' | 'not_answered' | 'marked_for_review' | 'marked_and_answered' | 'not_visited';
+

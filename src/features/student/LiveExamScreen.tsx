@@ -32,6 +32,7 @@ import {
   findStudentAttempt,
 } from '../../services/examService';
 import { useAuth } from '../../context/AuthContext';
+import { CachedImage } from '../../components/common/CachedImage';
 
 interface LiveExamScreenProps {
   test: TestItem;
@@ -499,13 +500,14 @@ export const LiveExamScreen: React.FC<LiveExamScreenProps> = ({
 
           {/* Action buttons (Questions Drawer Toggle & Submit) */}
           <div className="flex items-center gap-1.5">
-            {/* Offline indicator */}
+            {/* Offline practice mode indicator */}
             {!isOnline && (
               <span
-                title="Working Offline. Answers are saved locally."
-                className="p-1.5 bg-red-500/20 text-red-400 rounded-lg"
+                title="Offline Practice Mode: Working disconnected from internet. All questions, diagrams, and answers are saved securely on this device."
+                className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-amber-500/20 border border-amber-400/40 text-amber-300 rounded-lg text-xs font-bold"
               >
-                <WifiOff className="w-4 h-4" />
+                <WifiOff className="w-3.5 h-3.5 text-amber-400" />
+                <span className="hidden sm:inline">Offline Practice</span>
               </span>
             )}
 
@@ -617,7 +619,7 @@ export const LiveExamScreen: React.FC<LiveExamScreenProps> = ({
               {(currentQuestion.questionImageUrl || currentQuestion.imageUrl) && (
                 <div className="pt-2">
                   <div className="max-w-md rounded-xl overflow-hidden border border-slate-200 shadow-xs bg-slate-50">
-                    <img
+                    <CachedImage
                       src={currentQuestion.questionImageUrl || currentQuestion.imageUrl}
                       alt="Question Diagram"
                       className="w-full h-auto max-h-64 object-contain mx-auto bg-white"
@@ -678,7 +680,7 @@ export const LiveExamScreen: React.FC<LiveExamScreenProps> = ({
 
                       {optImage?.imageUrl && (
                         <div className="max-w-md rounded-xl overflow-hidden border border-slate-200 bg-white p-1.5 shadow-2xs">
-                          <img
+                          <CachedImage
                             src={optImage.imageUrl}
                             alt={`Option ${key} image`}
                             className="w-auto h-auto max-h-52 object-contain rounded"
@@ -896,6 +898,15 @@ export const LiveExamScreen: React.FC<LiveExamScreenProps> = ({
                   After clicking <strong>Submit Examination</strong>, answers become read-only and cannot be changed.
                 </span>
               </div>
+
+              {!isOnline && (
+                <div className="bg-blue-50 p-3 rounded-xl border border-blue-200 text-blue-900 text-xs flex items-start gap-2">
+                  <WifiOff className="w-4 h-4 shrink-0 mt-0.5 text-blue-600" />
+                  <span>
+                    <strong>Offline Practice Submission:</strong> Your result will be calculated locally on this device. When you reconnect to the internet, it will automatically sync to your student profile.
+                  </span>
+                </div>
+              )}
 
               <div className="flex items-center gap-3 pt-2">
                 <button

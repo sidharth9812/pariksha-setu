@@ -22,6 +22,7 @@ import {
   Menu,
   X,
   LayoutGrid,
+  WifiOff,
 } from 'lucide-react';
 import { StudentAttempt, TestItem, QuestionItem } from '../../types/exam';
 import {
@@ -30,6 +31,8 @@ import {
   subscribeToTest,
   getAllStudentAttemptsForTest,
 } from '../../services/examService';
+import { CachedImage } from '../../components/common/CachedImage';
+import { syncPendingOfflineAttempts, getDownloadedQuestions } from '../../services/offlineStorageService';
 
 interface StudentResultViewProps {
   attempt: StudentAttempt;
@@ -51,6 +54,39 @@ export const StudentResultView: React.FC<StudentResultViewProps> = ({
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [allAttempts, setAllAttempts] = useState<StudentAttempt[]>([attempt]);
   const [selectedAttemptId, setSelectedAttemptId] = useState<string>(attempt.id);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [isOnline, setIsOnline] = useState(typeof navigator !== 'undefined' ? navigator.onLine : true);
+
+  useEffect(() => {
+    const onOn = () => setIsOnline(true);
+    const onOff = () => setIsOnline(false);
+    window.addEventListener('online', onOn);
+    window.addEventListener('offline', onOff);
+    return () => {
+      window.removeEventListener('online', onOn);
+      window.removeEventListener('offline', onOff);
+    };
+  }, []);
+
+  const handleSyncAttempt = async () => {
+    if (!isOnline || isSyncing) return;
+    setIsSyncing(true);
+    try {
+      const res = await syncPendingOfflineAttempts();
+      if (res.syncedCount > 0) {
+        const syncedNow = new Date().toISOString();
+        setAllAttempts((prev) =>
+          prev.map((a) =>
+            a.id === selectedAttemptId ? { ...a, synced: true, syncedAt: syncedNow } : a
+          )
+        );
+      }
+    } catch (err) {
+      console.warn('Manual sync error:', err);
+    } finally {
+      setIsSyncing(false);
+    }
+  };
 
   // Load test data, all student attempts, & questions
   const loadData = async (isManualRefresh = false) => {
@@ -73,10 +109,14 @@ export const StudentResultView: React.FC<StudentResultViewProps> = ({
         Boolean(t?.instantResult) ||
         t?.status === 'completed' ||
         t?.status === 'result_published' ||
-        t?.status === 'released';
+        t?.status === 'released' ||
+        attempt.isOffline;
 
       if (isPublished) {
-        const qList = await getQuestionsForTest(attempt.testId, 'admin');
+        let qList = await getQuestionsForTest(attempt.testId, 'admin');
+        if (!qList || qList.length === 0) {
+          qList = await getDownloadedQuestions(attempt.testId);
+        }
         setQuestions(qList);
         if (qList.length > 0) {
           setSelectedQuestionId((prev) => prev || qList[0].id);
@@ -355,6 +395,43 @@ export const StudentResultView: React.FC<StudentResultViewProps> = ({
                 );
               })}
             </div>
+          </div>
+        )}
+
+        {/* Offline Attempt Status Banner */}
+        {currentAttempt.isOffline && !currentAttempt.synced && (
+          <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs print:hidden">
+            <div className="flex items-start sm:items-center gap-3">
+              <div className="p-2.5 bg-amber-100 text-amber-700 rounded-xl shrink-0">
+                <WifiOff className="w-5 h-5" />
+              </div>
+              <div>
+                <h4 className="text-xs sm:text-sm font-bold text-amber-900">
+                  Offline Practice Result • Saved Locally
+                </h4>
+                <p className="text-[11px] text-amber-700 leading-relaxed">
+                  This practice paper was completed offline. Your scorecard and complete explanations are saved safely on this device.
+                  {isOnline
+                    ? ' Reconnect to your institute account by clicking Sync Now.'
+                    : ' Connect to the internet to sync with your institute account.'}
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={handleSyncAttempt}
+              disabled={isSyncing || !isOnline}
+              className="px-4 py-2 bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white rounded-xl text-xs font-bold shrink-0 flex items-center justify-center gap-1.5 cursor-pointer shadow-xs transition-colors"
+            >
+              <RotateCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
+              <span>{isSyncing ? 'Syncing...' : isOnline ? 'Sync to Server' : 'Offline'}</span>
+            </button>
+          </div>
+        )}
+
+        {currentAttempt.isOffline && currentAttempt.synced && (
+          <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-3.5 flex items-center gap-2.5 text-xs text-emerald-800 font-semibold shadow-xs print:hidden">
+            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+            <span>Offline practice attempt successfully synchronized with your cloud profile.</span>
           </div>
         )}
 
@@ -855,7 +932,7 @@ export const StudentResultView: React.FC<StudentResultViewProps> = ({
                               {/* Question Diagram / Image */}
                               {(currentQuestion.questionImageUrl || currentQuestion.imageUrl) && (
                                 <div className="p-2 bg-slate-50 rounded-xl border border-slate-200 max-w-lg">
-                                  <img
+                                  <CachedImage
                                     src={currentQuestion.questionImageUrl || currentQuestion.imageUrl}
                                     alt={`Question ${displayQNum} Diagram`}
                                     className="w-full h-auto max-h-64 object-contain rounded-lg bg-white"
@@ -944,7 +1021,7 @@ export const StudentResultView: React.FC<StudentResultViewProps> = ({
                                           {/* Stacked Option Image Below Text */}
                                           {optImg?.imageUrl && (
                                             <div className="mt-2.5 max-w-[220px] rounded-lg overflow-hidden border border-slate-200 bg-white p-1 shadow-2xs">
-                                              <img
+                                              <CachedImage
                                                 src={optImg.imageUrl}
                                                 alt={`Option ${key} image`}
                                                 className="max-h-28 w-auto object-contain rounded"
