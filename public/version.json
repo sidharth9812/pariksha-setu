@@ -1,9 +1,9 @@
 {
   "appId": "com.parikshasetu.app",
-  "versionName": "1.1.2",
-  "versionCode": 4,
-  "apkFileName": "ParikshaSetu-v1.1.2-release.apk",
-  "downloadUrl": "https://github.com/sidharth9812/pariksha-setu/releases/download/v1.1.2/ParikshaSetu-v1.1.2-release.apk",
-  "releaseNotes": "ParikshaSetu v1.1.2 signed production Android release.",
-  "publishedAt": "2026-10-21T11:15:19Z"
+  "versionName": "1.1.3",
+  "versionCode": 5,
+  "apkFileName": "ParikshaSetu-v1.1.3-release.apk",
+  "downloadUrl": "https://github.com/sidharth9812/pariksha-setu/releases/download/v1.1.3/ParikshaSetu-v1.1.3-release.apk",
+  "releaseNotes": "ParikshaSetu v1.1.3 signed production Android release.",
+  "publishedAt": "2026-10-21T11:42:05Z"
 }
