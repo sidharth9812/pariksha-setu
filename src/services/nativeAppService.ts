@@ -1,4 +1,4 @@
-import { Capacitor } from '@capacitor/core';
+import { Capacitor, registerPlugin, PluginListenerHandle } from '@capacitor/core';
 import { App } from '@capacitor/app';
 import { StatusBar, Style } from '@capacitor/status-bar';
 
@@ -36,6 +36,41 @@ export interface AppUpdateCheckResult {
   source?: string;
   statusMessage?: string;
 }
+
+export interface ApkDownloadProgressEvent {
+  status: 'starting' | 'downloading' | 'completed' | 'cancelled' | 'error';
+  progress: number;
+  bytesDownloaded: number;
+  totalBytes: number;
+}
+
+export interface ApkInstallResult {
+  status: 'INSTALLER_LAUNCHED' | 'PERMISSION_REQUIRED';
+  fileName?: string;
+  bytesDownloaded?: number;
+  message?: string;
+}
+
+interface ApkUpdaterPluginInterface {
+  checkInstallPermission(): Promise<{
+    granted: boolean;
+    hasPendingApk: boolean;
+    fileName?: string;
+  }>;
+  openInstallPermissionSettings(): Promise<{ opened: boolean }>;
+  downloadAndInstallApk(options: {
+    downloadUrl: string;
+    apkFileName: string;
+  }): Promise<ApkInstallResult>;
+  installDownloadedApk(options?: { apkFileName?: string }): Promise<ApkInstallResult>;
+  cancelDownload(): Promise<{ cancelled: boolean }>;
+  addListener(
+    eventName: 'downloadProgress',
+    listenerFunc: (event: ApkDownloadProgressEvent) => void
+  ): Promise<PluginListenerHandle>;
+}
+
+const ApkUpdater = registerPlugin<ApkUpdaterPluginInterface>('ApkUpdater');
 
 /**
  * Initializes native Android / Capacitor specific behaviors:
@@ -372,26 +407,125 @@ export async function checkForAppUpdate(options?: {
 }
 
 /**
- * Triggers downloading the official signed Release APK via Android's external browser /
- * Download Manager so that Android's normal system Package Installer performs an
- * in-place update without uninstalling or clearing user data.
+ * Formats byte count into a human-readable string (e.g. "14.2 MB").
  */
-export function openOfficialApkDownload(downloadUrl: string): void {
-  const cleanUrl = String(downloadUrl || '').trim();
-  if (!cleanUrl.startsWith('https://') || cleanUrl.toLowerCase().includes('-debug.apk')) {
+export function formatByteSize(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) return '0 KB';
+  if (bytes < 1024 * 1024) {
+    return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+  }
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+/**
+ * Checks whether the current Android app has permission to install unknown apps
+ * (REQUEST_INSTALL_PACKAGES) and whether an APK is already downloaded in cache.
+ */
+export async function checkUnknownSourcesPermission(): Promise<{
+  granted: boolean;
+  hasPendingApk: boolean;
+  fileName?: string;
+}> {
+  if (!Capacitor.isNativePlatform() || Capacitor.getPlatform() !== 'android') {
+    return { granted: false, hasPendingApk: false };
+  }
+  try {
+    return await ApkUpdater.checkInstallPermission();
+  } catch {
+    return { granted: false, hasPendingApk: false };
+  }
+}
+
+/**
+ * Opens the Android system screen "Install unknown apps" specifically for
+ * com.parikshasetu.app so the user can toggle "Allow from this source".
+ */
+export async function openUnknownSourcesSettings(): Promise<void> {
+  if (!Capacitor.isNativePlatform() || Capacitor.getPlatform() !== 'android') {
     return;
   }
+  await ApkUpdater.openInstallPermissionSettings();
+}
 
-  const anchor = document.createElement('a');
-  anchor.href = cleanUrl;
-  anchor.target = '_blank';
-  anchor.rel = 'noopener noreferrer';
-  anchor.style.display = 'none';
-  document.body.appendChild(anchor);
-  anchor.click();
-  setTimeout(() => {
-    if (anchor.parentNode) {
-      anchor.parentNode.removeChild(anchor);
+/**
+ * Launches the Android system Package Installer for an APK that has already been
+ * downloaded into the app's private cache directory via FileProvider (content:// URI).
+ */
+export async function installPendingDownloadedApk(apkFileName?: string): Promise<ApkInstallResult> {
+  if (!Capacitor.isNativePlatform() || Capacitor.getPlatform() !== 'android') {
+    throw new Error('In-app APK installation is only supported inside the ParikshaSetu Android app.');
+  }
+  return await ApkUpdater.installDownloadedApk({ apkFileName });
+}
+
+/**
+ * Cancels an active in-app APK download and removes the partial file.
+ */
+export async function cancelInAppApkDownload(): Promise<void> {
+  if (!Capacitor.isNativePlatform() || Capacitor.getPlatform() !== 'android') {
+    return;
+  }
+  try {
+    await ApkUpdater.cancelDownload();
+  } catch {
+    // Ignore cancel errors
+  }
+}
+
+/**
+ * Downloads the signed production release APK directly inside the Android app
+ * (into app-private cache storage) with real-time progress reporting, then launches
+ * Android's native Package Installer via FileProvider (content:// URI) without
+ * opening Chrome or any external browser.
+ */
+export async function downloadAndInstallOfficialApk(
+  manifest: AppVersionManifest,
+  onProgress?: (event: ApkDownloadProgressEvent) => void
+): Promise<ApkInstallResult> {
+  const cleanUrl = String(manifest.downloadUrl || '').trim();
+  const apkFileName = String(
+    manifest.apkFileName || `ParikshaSetu-v${manifest.versionName}-release.apk`
+  ).trim();
+
+  if (!cleanUrl.startsWith('https://') || cleanUrl.toLowerCase().includes('-debug.apk')) {
+    throw new Error('Invalid or non-production APK download URL.');
+  }
+
+  if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    throw new Error('No internet connection. Please connect to the internet and try again.');
+  }
+
+  if (!Capacitor.isNativePlatform() || Capacitor.getPlatform() !== 'android') {
+    throw new Error(
+      'In-app APK updates are available inside the installed ParikshaSetu Android app. On web, updates are applied automatically.'
+    );
+  }
+
+  let listenerHandle: PluginListenerHandle | null = null;
+  try {
+    if (onProgress) {
+      listenerHandle = await ApkUpdater.addListener('downloadProgress', (event) => {
+        onProgress(event);
+      });
     }
-  }, 200);
+
+    const result = await ApkUpdater.downloadAndInstallApk({
+      downloadUrl: cleanUrl,
+      apkFileName,
+    });
+    return result;
+  } catch (err: any) {
+    const rawMsg = err?.message || String(err || '');
+    throw new Error(
+      rawMsg || 'Failed to download update APK. Please check your internet connection and retry.'
+    );
+  } finally {
+    if (listenerHandle) {
+      try {
+        await listenerHandle.remove();
+      } catch {
+        // Ignore listener removal error
+      }
+    }
+  }
 }

@@ -72,10 +72,10 @@ import {
 import {
   checkForAppUpdate,
   getInstalledAppVersion,
-  openOfficialApkDownload,
   ANDROID_PACKAGE_ID,
   AppUpdateCheckResult,
 } from '../../services/nativeAppService';
+import { InAppUpdateActionPanel } from '../../components/PWAInstallButton';
 
 interface StudentHomeProps {
   onSelectTest: (test: TestItem) => void;
@@ -2110,7 +2110,7 @@ export const StudentHome: React.FC<StudentHomeProps> = ({
                   >
                     {manualUpdateCheck.updateAvailable && manualUpdateCheck.latestManifest ? (
                       <>
-                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                        <div className="space-y-3">
                           <div>
                             <div className="font-bold text-sm text-indigo-950 flex items-center gap-2">
                               <span>New Version Available: v{manualUpdateCheck.latestManifest.versionName}</span>
@@ -2124,23 +2124,13 @@ export const StudentHome: React.FC<StudentHomeProps> = ({
                               </p>
                             )}
                           </div>
-                          <a
-                            href={manualUpdateCheck.latestManifest.downloadUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            onClick={(e) => {
-                              e.preventDefault();
-                              openOfficialApkDownload(manualUpdateCheck.latestManifest!.downloadUrl);
-                            }}
-                            className="inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs shadow-xs transition-colors cursor-pointer shrink-0"
-                          >
-                            <Download className="w-3.5 h-3.5" />
-                            <span>Download Update</span>
-                            <ExternalLink className="w-3 h-3" />
-                          </a>
+                          <InAppUpdateActionPanel
+                            manifest={manualUpdateCheck.latestManifest}
+                            theme="light"
+                          />
                         </div>
                         <p className="text-[11px] text-slate-500">
-                          Installing the downloaded APK updates ParikshaSetu in-place via Android&apos;s package installer without clearing your offline tests or account data.
+                          Downloads the signed APK directly inside ParikshaSetu and launches Android&apos;s package installer via FileProvider without clearing your offline tests or account data.
                         </p>
                       </>
                     ) : (
