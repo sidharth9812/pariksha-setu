@@ -130,7 +130,7 @@ export const StudentHome: React.FC<StudentHomeProps> = ({
   const handleManualUpdateCheck = async () => {
     setIsCheckingUpdate(true);
     try {
-      const result = await checkForAppUpdate();
+      const result = await checkForAppUpdate({ isManualCheck: true });
       setManualUpdateCheck(result);
     } finally {
       setIsCheckingUpdate(false);

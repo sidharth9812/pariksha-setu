@@ -3,8 +3,12 @@ import { App } from '@capacitor/app';
 import { StatusBar, Style } from '@capacitor/status-bar';
 
 export const ANDROID_PACKAGE_ID = 'com.parikshasetu.app';
+export const DEFAULT_GITHUB_REPO = 'sidharth9812/pariksha-setu';
+export const STABLE_VERSION_MANIFEST_URL =
+  'https://raw.githubusercontent.com/sidharth9812/pariksha-setu/main/public/version.json';
 export const DEFAULT_APP_VERSION = (import.meta as any).env?.VITE_APP_VERSION || '1.0.0';
 export const DEFAULT_APP_VERSION_CODE = Number((import.meta as any).env?.VITE_APP_VERSION_CODE) || 1;
+export const BUILD_MODE = (import.meta as any).env?.VITE_BUILD_MODE || 'release';
 
 export interface AppVersionManifest {
   appId: string;
@@ -181,10 +185,9 @@ export function isGenuinelyNewerRelease(
   if (!downloadUrl.startsWith('https://')) {
     return false;
   }
-  if (
-    downloadUrl.toLowerCase().includes('-debug.apk') ||
-    (manifest.apkFileName && manifest.apkFileName.toLowerCase().includes('-debug.apk'))
-  ) {
+  const lowerUrl = downloadUrl.toLowerCase();
+  const lowerFile = String(manifest.apkFileName || '').toLowerCase();
+  if (lowerUrl.includes('-debug.apk') || lowerUrl.includes('/debug/') || lowerFile.includes('-debug.apk')) {
     return false;
   }
 
@@ -266,17 +269,30 @@ function parseManifestObject(raw: any): AppVersionManifest | null {
 }
 
 /**
- * Checks for a genuinely newer production release APK using the configured
- * GitHub-hosted release/version manifest.
+ * Checks for a genuinely newer production release APK using the stable
+ * GitHub-hosted release/version manifest:
+ * https://raw.githubusercontent.com/sidharth9812/pariksha-setu/main/public/version.json
  *
- * Never blocks app startup and handles offline/network errors silently.
+ * Excludes debug builds from production update notifications, never blocks app startup,
+ * and handles offline/network errors silently.
  */
 export async function checkForAppUpdate(options?: {
   customManifestUrl?: string;
-  githubRepo?: string;
+  isManualCheck?: boolean;
 }): Promise<AppUpdateCheckResult> {
   const installed = await getInstalledAppVersion();
   const checkedAt = new Date().toISOString();
+
+  // Keep debug builds excluded from automatic production update notifications
+  if (!options?.isManualCheck && String(BUILD_MODE).toLowerCase() === 'debug') {
+    return {
+      updateAvailable: false,
+      currentVersionName: installed.versionName,
+      currentVersionCode: installed.versionCode,
+      checkedAt,
+      statusMessage: 'Debug build excluded from production update notifications.',
+    };
+  }
 
   // Do not perform network requests when offline
   if (typeof navigator !== 'undefined' && !navigator.onLine) {
@@ -289,152 +305,37 @@ export async function checkForAppUpdate(options?: {
     };
   }
 
-  // Skip update prompts on explicitly marked debug builds unless manually checking
-  const envManifestUrl = String(
-    options?.customManifestUrl || (import.meta as any).env?.VITE_UPDATE_MANIFEST_URL || ''
+  const manifestUrl = String(
+    options?.customManifestUrl ||
+      (import.meta as any).env?.VITE_UPDATE_MANIFEST_URL ||
+      STABLE_VERSION_MANIFEST_URL
   ).trim();
-  const envGithubRepo = String(
-    options?.githubRepo || (import.meta as any).env?.VITE_GITHUB_REPO || ''
-  )
-    .trim()
-    .replace(/^https?:\/\/github\.com\//i, '')
-    .replace(/\.git$/i, '')
-    .replace(/^\/+|\/+$/g, '');
 
   try {
-    // 1. Check explicit GitHub-hosted / custom version.json manifest URL if provided
-    if (envManifestUrl && envManifestUrl.startsWith('https://')) {
-      const rawData = await fetchJsonWithTimeout<any>(envManifestUrl);
-      const manifest = parseManifestObject(rawData);
-      if (manifest && isGenuinelyNewerRelease(manifest, installed.versionName, installed.versionCode)) {
+    const rawData = await fetchJsonWithTimeout<any>(manifestUrl);
+    const manifest = parseManifestObject(rawData);
+
+    if (manifest) {
+      if (isGenuinelyNewerRelease(manifest, installed.versionName, installed.versionCode)) {
         return {
           updateAvailable: true,
           currentVersionName: installed.versionName,
           currentVersionCode: installed.versionCode,
           latestManifest: manifest,
           checkedAt,
-          source: envManifestUrl,
+          source: manifestUrl,
         };
       }
-      if (manifest) {
-        return {
-          updateAvailable: false,
-          currentVersionName: installed.versionName,
-          currentVersionCode: installed.versionCode,
-          latestManifest: manifest,
-          checkedAt,
-          source: envManifestUrl,
-          statusMessage: `You are running the latest version (v${installed.versionName}).`,
-        };
-      }
-    }
 
-    // 2. Check repository's GitHub Releases API & raw version.json manifest if repository is configured
-    if (envGithubRepo && /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(envGithubRepo)) {
-      // 2a. Query GitHub Latest Release API (supports CORS in Android WebView and provides official release asset URLs)
-      const releaseApiUrl = `https://api.github.com/repos/${envGithubRepo}/releases/latest`;
-      const releaseData = await fetchJsonWithTimeout<any>(releaseApiUrl);
-
-      if (releaseData && !releaseData.draft && !releaseData.prerelease) {
-        const assets: any[] = Array.isArray(releaseData.assets) ? releaseData.assets : [];
-
-        // Find the signed production release APK asset (ParikshaSetu-v*-release.apk)
-        const releaseApkAsset =
-          assets.find(
-            (a) =>
-              typeof a?.name === 'string' &&
-              a.name.endsWith('-release.apk') &&
-              typeof a?.browser_download_url === 'string'
-          ) ||
-          assets.find(
-            (a) =>
-              typeof a?.name === 'string' &&
-              a.name.endsWith('.apk') &&
-              !a.name.toLowerCase().includes('-debug.apk') &&
-              typeof a?.browser_download_url === 'string'
-          );
-
-        const releaseVersionName = String(releaseData.tag_name || releaseData.name || '')
-          .trim()
-          .replace(/^[vV]/, '');
-
-        // Also check raw version.json from the repository if we want exact versionCode metadata
-        let manifestVersionCode = 0;
-        let manifestAppId = ANDROID_PACKAGE_ID;
-        const rawManifestData = await fetchJsonWithTimeout<any>(
-          `https://raw.githubusercontent.com/${envGithubRepo}/main/public/version.json`
-        );
-        const parsedRawManifest = parseManifestObject(rawManifestData);
-        if (parsedRawManifest && parsedRawManifest.versionName === releaseVersionName) {
-          manifestVersionCode = parsedRawManifest.versionCode;
-          manifestAppId = parsedRawManifest.appId;
-        }
-
-        if (releaseVersionName && releaseApkAsset?.browser_download_url) {
-          const candidateManifest: AppVersionManifest = {
-            appId: manifestAppId,
-            versionName: releaseVersionName,
-            versionCode: manifestVersionCode,
-            apkFileName: releaseApkAsset.name,
-            downloadUrl: releaseApkAsset.browser_download_url,
-            releaseNotes: releaseData.body ? String(releaseData.body).trim() : undefined,
-            publishedAt: releaseData.published_at || undefined,
-          };
-
-          if (isGenuinelyNewerRelease(candidateManifest, installed.versionName, installed.versionCode)) {
-            return {
-              updateAvailable: true,
-              currentVersionName: installed.versionName,
-              currentVersionCode: installed.versionCode,
-              latestManifest: candidateManifest,
-              checkedAt,
-              source: releaseApiUrl,
-            };
-          }
-
-          return {
-            updateAvailable: false,
-            currentVersionName: installed.versionName,
-            currentVersionCode: installed.versionCode,
-            latestManifest: candidateManifest,
-            checkedAt,
-            source: releaseApiUrl,
-            statusMessage: `You are running the latest version (v${installed.versionName}).`,
-          };
-        }
-      }
-
-      // 2b. Fallback: Check raw version.json hosted in the repository's default branch
-      const rawBranchManifestUrl = `https://raw.githubusercontent.com/${envGithubRepo}/main/public/version.json`;
-      const rawManifest = parseManifestObject(await fetchJsonWithTimeout<any>(rawBranchManifestUrl));
-      if (rawManifest) {
-        // If downloadUrl wasn't populated in public/version.json, derive the official GitHub Release download URL
-        if (!rawManifest.downloadUrl && rawManifest.versionName) {
-          const fileName = rawManifest.apkFileName || `ParikshaSetu-v${rawManifest.versionName}-release.apk`;
-          rawManifest.downloadUrl = `https://github.com/${envGithubRepo}/releases/download/v${rawManifest.versionName}/${fileName}`;
-        }
-
-        if (isGenuinelyNewerRelease(rawManifest, installed.versionName, installed.versionCode)) {
-          return {
-            updateAvailable: true,
-            currentVersionName: installed.versionName,
-            currentVersionCode: installed.versionCode,
-            latestManifest: rawManifest,
-            checkedAt,
-            source: rawBranchManifestUrl,
-          };
-        }
-
-        return {
-          updateAvailable: false,
-          currentVersionName: installed.versionName,
-          currentVersionCode: installed.versionCode,
-          latestManifest: rawManifest,
-          checkedAt,
-          source: rawBranchManifestUrl,
-          statusMessage: `You are running the latest version (v${installed.versionName}).`,
-        };
-      }
+      return {
+        updateAvailable: false,
+        currentVersionName: installed.versionName,
+        currentVersionCode: installed.versionCode,
+        latestManifest: manifest,
+        checkedAt,
+        source: manifestUrl,
+        statusMessage: `You are running the latest version (v${installed.versionName}).`,
+      };
     }
 
     return {
@@ -442,6 +343,7 @@ export async function checkForAppUpdate(options?: {
       currentVersionName: installed.versionName,
       currentVersionCode: installed.versionCode,
       checkedAt,
+      source: manifestUrl,
       statusMessage: `Installed version v${installed.versionName} is up to date.`,
     };
   } catch (err) {
@@ -451,7 +353,8 @@ export async function checkForAppUpdate(options?: {
       currentVersionName: installed.versionName,
       currentVersionCode: installed.versionCode,
       checkedAt,
-      statusMessage: 'Could not reach update server. Please check your internet connection.',
+      source: manifestUrl,
+      statusMessage: 'Could not reach update manifest. Please check your internet connection.',
     };
   }
 }

@@ -84,6 +84,7 @@ jobs:
       - name: Build Web Application
         env:
           VITE_GITHUB_REPO: ${{ github.repository }}
+          VITE_UPDATE_MANIFEST_URL: https://raw.githubusercontent.com/${{ github.repository }}/main/public/version.json
           VITE_APP_VERSION: ${{ steps.meta.outputs.version }}
           VITE_APP_VERSION_CODE: ${{ steps.meta.outputs.version_code }}
           VITE_BUILD_MODE: ${{ steps.meta.outputs.mode }}
@@ -104,9 +105,12 @@ jobs:
           mkdir -p build-output
           cp android/app/build/outputs/apk/debug/app-debug.apk "build-output/ParikshaSetu-v${{ steps.meta.outputs.version }}-debug.apk"
 
-      - name: Validate Release Signing Secrets
+      - name: Validate Release Signing Secrets & Tag Uniqueness
         if: steps.meta.outputs.mode == 'release'
         env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: v${{ steps.meta.outputs.version }}
+          PUBLISH_RELEASE: ${{ inputs.publish_release }}
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
@@ -114,6 +118,10 @@ jobs:
         run: |
           if [ -z "$KEYSTORE_BASE64" ] || [ -z "$KEYSTORE_PASSWORD" ] || [ -z "$KEY_ALIAS" ] || [ -z "$KEY_PASSWORD" ]; then
             echo "::error::Missing required GitHub Actions Secrets for production release signing (KEYSTORE_BASE64, KEYSTORE_PASSWORD, KEY_ALIAS, KEY_PASSWORD)."
+            exit 1
+          fi
+          if [ "$PUBLISH_RELEASE" != "false" ] && gh release view "$TAG_NAME" >/dev/null 2>&1; then
+            echo "::error::Release tag $TAG_NAME already exists. Existing release tags and assets must not be overwritten. Increment versionName and versionCode in android/app/build.gradle before publishing a new release."
             exit 1
           fi
 
@@ -125,11 +133,7 @@ jobs:
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
           KEYSTORE_FILE: release.keystore
-          APP_VER: ${{ steps.meta.outputs.version }}
-          APP_VER_CODE: ${{ steps.meta.outputs.version_code }}
           APK_FILE: ParikshaSetu-v${{ steps.meta.outputs.version }}-release.apk
-          DL_URL: ${{ github.server_url }}/${{ github.repository }}/releases/download/v${{ steps.meta.outputs.version }}/ParikshaSetu-v${{ steps.meta.outputs.version }}-release.apk
-          REL_NOTES: ${{ inputs.release_notes || format('ParikshaSetu v{0} signed production Android release.', steps.meta.outputs.version) }}
         run: |
           echo "Decoding production keystore into temporary file..."
           echo "$KEYSTORE_BASE64" | base64 --decode > android/app/release.keystore
@@ -145,8 +149,43 @@ jobs:
           cp android/app/build/outputs/apk/release/app-release.apk "build-output/$APK_FILE"
           "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose "build-output/$APK_FILE"
 
-          # Generate release version.json manifest using the repository's actual configuration
+      - name: Cleanup Temporary Keystore Files
+        if: always()
+        run: |
+          rm -f android/app/release.keystore
+          rm -f *.keystore *.jks
+
+      - name: Publish Signed Release APK First & Then Publish Accurate version.json
+        if: steps.meta.outputs.mode == 'release'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PUBLISH_RELEASE: ${{ inputs.publish_release }}
+          TAG_NAME: v${{ steps.meta.outputs.version }}
+          APP_VER: ${{ steps.meta.outputs.version }}
+          APP_VER_CODE: ${{ steps.meta.outputs.version_code }}
+          APK_FILE: ParikshaSetu-v${{ steps.meta.outputs.version }}-release.apk
+          APK_PATH: build-output/ParikshaSetu-v${{ steps.meta.outputs.version }}-release.apk
+          FALLBACK_DL_URL: ${{ github.server_url }}/${{ github.repository }}/releases/download/v${{ steps.meta.outputs.version }}/ParikshaSetu-v${{ steps.meta.outputs.version }}-release.apk
+          REL_NOTES: ${{ inputs.release_notes || format('ParikshaSetu v{0} signed production Android release.', steps.meta.outputs.version) }}
+        run: |
           export PUB_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          export ACTUAL_DL_URL="$FALLBACK_DL_URL"
+
+          if [ "$PUBLISH_RELEASE" != "false" ]; then
+            # 1. Publish the signed release APK to GitHub Releases FIRST (never overwriting existing tags/assets)
+            gh release create "$TAG_NAME" "$APK_PATH" \
+              --title "ParikshaSetu $TAG_NAME" \
+              --notes "$REL_NOTES" \
+              --latest
+
+            # 2. Query the actual published release asset browser_download_url from GitHub Releases
+            RESOLVED_URL=$(gh release view "$TAG_NAME" --json assets --jq ".assets[] | select(.name == \"$APK_FILE\") | .url" | head -n 1)
+            if [ -n "$RESOLVED_URL" ]; then
+              export ACTUAL_DL_URL="$RESOLVED_URL"
+            fi
+          fi
+
+          # 3. Generate version.json with the actual release asset URL
           node -e '
             const fs = require("fs");
             const manifest = {
@@ -154,18 +193,28 @@ jobs:
               versionName: process.env.APP_VER,
               versionCode: Number(process.env.APP_VER_CODE) || 1,
               apkFileName: process.env.APK_FILE,
-              downloadUrl: process.env.DL_URL,
+              downloadUrl: process.env.ACTUAL_DL_URL,
               releaseNotes: process.env.REL_NOTES,
               publishedAt: process.env.PUB_AT
             };
-            fs.writeFileSync("build-output/version.json", JSON.stringify(manifest, null, 2) + "\n");
+            const json = JSON.stringify(manifest, null, 2) + "\n";
+            fs.writeFileSync("build-output/version.json", json);
+            fs.writeFileSync("public/version.json", json);
           '
 
-      - name: Cleanup Temporary Keystore Files
-        if: always()
-        run: |
-          rm -f android/app/release.keystore
-          rm -f *.keystore *.jks
+          if [ "$PUBLISH_RELEASE" != "false" ]; then
+            # 4. Upload version.json to the GitHub Release (without clobbering existing assets)
+            gh release upload "$TAG_NAME" "build-output/version.json"
+
+            # 5. Update public/version.json on main branch so the stable raw manifest URL reflects the published APK
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            if ! git diff --quiet public/version.json; then
+              git add public/version.json
+              git commit -m "chore(release): update public/version.json for $TAG_NAME [skip ci]"
+              git push origin HEAD:main || echo "::warning::Could not push updated public/version.json to main branch automatically."
+            fi
+          fi
 
       - name: Upload APK & Manifest Artifact
         uses: actions/upload-artifact@v4
@@ -175,19 +224,4 @@ jobs:
           retention-days: 30
           if-no-files-found: error
 
-      - name: Publish Signed Release APK & Version Manifest to GitHub Releases
-        if: steps.meta.outputs.mode == 'release' && inputs.publish_release != false
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG_NAME: v${{ steps.meta.outputs.version }}
-          APK_PATH: build-output/ParikshaSetu-v${{ steps.meta.outputs.version }}-release.apk
-          MANIFEST_PATH: build-output/version.json
-          REL_NOTES: ${{ inputs.release_notes || format('ParikshaSetu v{0} signed production Android release.', steps.meta.outputs.version) }}
-        run: |
-          if gh release view "$TAG_NAME" >/dev/null 2>&1; then
-            gh release upload "$TAG_NAME" "$APK_PATH" "$MANIFEST_PATH" --clobber
-            gh release edit "$TAG_NAME" --title "ParikshaSetu $TAG_NAME" --notes "$REL_NOTES" --latest
-          else
-            gh release create "$TAG_NAME" "$APK_PATH" "$MANIFEST_PATH" --title "ParikshaSetu $TAG_NAME" --notes "$REL_NOTES" --latest
-          fi
 
