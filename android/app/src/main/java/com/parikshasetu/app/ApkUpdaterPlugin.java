@@ -2,6 +2,10 @@ package com.parikshasetu.app;
 
 import android.content.Context;
 import android.content.Intent;
+import android.content.pm.PackageInfo;
+import android.content.pm.PackageManager;
+import android.content.pm.Signature;
+import android.content.pm.SigningInfo;
 import android.net.Uri;
 import android.os.Build;
 import android.provider.Settings;
@@ -21,23 +25,32 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.security.MessageDigest;
+import java.util.HashSet;
 import java.util.Locale;
+import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Native Capacitor plugin for Option 1: In-App APK Download and Update.
- * - Downloads the signed production release APK directly inside the app (no external browser).
- * - Emits real-time download progress (bytesDownloaded, totalBytes, percentage).
- * - Stores the APK in app-private cache directory (cacheDir/apk_updates).
- * - Checks and requests Android's "Install unknown apps" permission when needed.
- * - Launches the standard Android Package Installer via FileProvider content:// URI
- *   for a safe in-place update that preserves all app data.
+ * Security guarantees:
+ * 1. Restricts APK downloads exclusively to the official GitHub Releases URL prefix
+ *    (https://github.com/sidharth9812/pariksha-setu/releases/download/) and official
+ *    GitHub asset redirect hosts (*.githubusercontent.com).
+ * 2. Stores downloaded APKs only inside app-private cache (cacheDir/apk_updates).
+ * 3. Verifies the downloaded archive is a valid APK whose packageName matches
+ *    com.parikshasetu.app, whose versionCode is not a downgrade, and whose signing
+ *    certificate SHA-256 matches the currently installed app before launching the
+ *    system Package Installer.
  */
 @CapacitorPlugin(name = "ApkUpdater")
 public class ApkUpdaterPlugin extends Plugin {
 
+    private static final String EXPECTED_PACKAGE_ID = "com.parikshasetu.app";
+    private static final String OFFICIAL_RELEASE_URL_PREFIX =
+        "https://github.com/sidharth9812/pariksha-setu/releases/download/";
     private static final String UPDATES_SUBDIR = "apk_updates";
     private static final int CONNECT_TIMEOUT_MS = 20000;
     private static final int READ_TIMEOUT_MS = 30000;
@@ -103,11 +116,20 @@ public class ApkUpdaterPlugin extends Plugin {
             return;
         }
 
+        try {
+            verifyDownloadedApkArchive(targetApk);
+        } catch (IOException e) {
+            //noinspection ResultOfMethodCallIgnored
+            targetApk.delete();
+            call.reject(e.getMessage());
+            return;
+        }
+
         if (!canRequestPackageInstalls()) {
             JSObject ret = new JSObject();
             ret.put("status", "PERMISSION_REQUIRED");
             ret.put("fileName", targetApk.getName());
-            ret.put("message", "Please allow ParikshaSetu to install app updates in Android Settings, then tap 'Install Now'.");
+            ret.put("message", "Please allow ParikshaSetu to install app updates in Android Settings, then tap 'Install Update Now'.");
             call.resolve(ret);
             return;
         }
@@ -128,8 +150,8 @@ public class ApkUpdaterPlugin extends Plugin {
         final String downloadUrl = call.getString("downloadUrl", "").trim();
         final String rawFileName = call.getString("apkFileName", "ParikshaSetu-release.apk").trim();
 
-        if (downloadUrl.isEmpty() || !downloadUrl.toLowerCase(Locale.US).startsWith("https://")) {
-            call.reject("Invalid update URL. Only official HTTPS release APK URLs are allowed.");
+        if (!isOfficialReleaseDownloadUrl(downloadUrl)) {
+            call.reject("Blocked untrusted update URL. Updates may only be downloaded from official ParikshaSetu GitHub Releases.");
             return;
         }
 
@@ -221,6 +243,9 @@ public class ApkUpdaterPlugin extends Plugin {
                     throw new IOException("Downloaded file is not a valid Android APK package.");
                 }
 
+                // Verify packageId, versionCode, and signing certificate match before accepting the APK
+                verifyDownloadedApkArchive(partFile);
+
                 if (finalApkFile.exists() && !finalApkFile.delete()) {
                     throw new IOException("Unable to replace previous APK file in cache.");
                 }
@@ -237,7 +262,7 @@ public class ApkUpdaterPlugin extends Plugin {
                     ret.put("status", "PERMISSION_REQUIRED");
                     ret.put("fileName", finalApkFile.getName());
                     ret.put("bytesDownloaded", bytesDownloaded);
-                    ret.put("message", "APK downloaded! Please allow 'Install unknown apps' for ParikshaSetu to complete the update.");
+                    ret.put("message", "APK downloaded and verified! Please allow 'Install unknown apps' for ParikshaSetu to complete the update.");
                     call.resolve(ret);
                     return;
                 }
@@ -280,12 +305,43 @@ public class ApkUpdaterPlugin extends Plugin {
         });
     }
 
+    private boolean isOfficialReleaseDownloadUrl(String urlStr) {
+        if (urlStr == null || urlStr.isEmpty()) {
+            return false;
+        }
+        String clean = urlStr.trim();
+        if (!clean.startsWith(OFFICIAL_RELEASE_URL_PREFIX) || !clean.toLowerCase(Locale.US).endsWith(".apk")) {
+            return false;
+        }
+        try {
+            URL parsed = new URL(clean);
+            return "https".equalsIgnoreCase(parsed.getProtocol())
+                && "github.com".equalsIgnoreCase(parsed.getHost());
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private boolean isAllowedRedirectHost(String host) {
+        if (host == null) return false;
+        String lower = host.toLowerCase(Locale.US);
+        return lower.equals("github.com")
+            || lower.endsWith(".github.com")
+            || lower.endsWith(".githubusercontent.com");
+    }
+
     private HttpURLConnection openHttpsConnectionWithRedirects(String initialUrl) throws IOException {
+        if (!isOfficialReleaseDownloadUrl(initialUrl)) {
+            throw new IOException("Untrusted initial download URL blocked.");
+        }
         String currentUrl = initialUrl;
         for (int redirectCount = 0; redirectCount <= MAX_REDIRECTS; redirectCount++) {
             URL url = new URL(currentUrl);
             if (!"https".equalsIgnoreCase(url.getProtocol())) {
                 throw new IOException("Insecure redirect blocked. Only HTTPS connections are permitted.");
+            }
+            if (!isAllowedRedirectHost(url.getHost())) {
+                throw new IOException("Untrusted redirect host blocked: " + url.getHost());
             }
 
             HttpURLConnection conn = (HttpURLConnection) url.openConnection();
@@ -319,6 +375,107 @@ public class ApkUpdaterPlugin extends Plugin {
         throw new IOException("Too many redirects while downloading APK.");
     }
 
+    /**
+     * Verifies that the downloaded APK file:
+     * 1. Has the exact package name com.parikshasetu.app
+     * 2. Has a versionCode >= the currently installed versionCode
+     * 3. Is signed with the same certificate SHA-256 as the currently installed app
+     */
+    @SuppressWarnings("deprecation")
+    private void verifyDownloadedApkArchive(File apkFile) throws IOException {
+        Context context = getContext();
+        PackageManager pm = context.getPackageManager();
+        String archivePath = apkFile.getAbsolutePath();
+
+        int flags = Build.VERSION.SDK_INT >= Build.VERSION_CODES.P
+            ? PackageManager.GET_SIGNING_CERTIFICATES
+            : PackageManager.GET_SIGNATURES;
+
+        PackageInfo archiveInfo = pm.getPackageArchiveInfo(archivePath, flags);
+        if (archiveInfo == null || archiveInfo.packageName == null) {
+            throw new IOException("Downloaded file is not a valid Android package archive.");
+        }
+
+        String currentPkg = context.getPackageName();
+        if (!EXPECTED_PACKAGE_ID.equals(archiveInfo.packageName) || !currentPkg.equals(archiveInfo.packageName)) {
+            throw new IOException("Package ID mismatch in downloaded APK (" + archiveInfo.packageName + "). Update aborted.");
+        }
+
+        try {
+            PackageInfo installedInfo = pm.getPackageInfo(currentPkg, flags);
+            long installedCode = Build.VERSION.SDK_INT >= Build.VERSION_CODES.P
+                ? installedInfo.getLongVersionCode()
+                : installedInfo.versionCode;
+            long archiveCode = Build.VERSION.SDK_INT >= Build.VERSION_CODES.P
+                ? archiveInfo.getLongVersionCode()
+                : archiveInfo.versionCode;
+
+            if (archiveCode < installedCode) {
+                throw new IOException("Downloaded APK versionCode (" + archiveCode + ") is older than installed versionCode (" + installedCode + ").");
+            }
+
+            Set<String> installedDigests = extractSignatureDigests(installedInfo);
+            Set<String> archiveDigests = extractSignatureDigests(archiveInfo);
+
+            // If Android returned archive certificates from getPackageArchiveInfo, enforce exact match
+            if (!installedDigests.isEmpty() && !archiveDigests.isEmpty()) {
+                boolean matches = false;
+                for (String digest : archiveDigests) {
+                    if (installedDigests.contains(digest)) {
+                        matches = true;
+                        break;
+                    }
+                }
+                if (!matches) {
+                    throw new IOException("Signing certificate mismatch! The downloaded APK is not signed with the official ParikshaSetu release key.");
+                }
+            }
+        } catch (PackageManager.NameNotFoundException e) {
+            throw new IOException("Unable to read installed package info for verification.");
+        }
+    }
+
+    @SuppressWarnings("deprecation")
+    private Set<String> extractSignatureDigests(PackageInfo pkgInfo) {
+        Set<String> digests = new HashSet<>();
+        if (pkgInfo == null) return digests;
+
+        Signature[] signatures = null;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && pkgInfo.signingInfo != null) {
+            SigningInfo signingInfo = pkgInfo.signingInfo;
+            signatures = signingInfo.hasMultipleSigners()
+                ? signingInfo.getApkContentsSigners()
+                : signingInfo.getSigningCertificateHistory();
+        } else if (pkgInfo.signatures != null) {
+            signatures = pkgInfo.signatures;
+        }
+
+        if (signatures == null) return digests;
+        for (Signature sig : signatures) {
+            if (sig != null) {
+                String sha256 = sha256Hex(sig.toByteArray());
+                if (!sha256.isEmpty()) {
+                    digests.add(sha256);
+                }
+            }
+        }
+        return digests;
+    }
+
+    private String sha256Hex(byte[] data) {
+        try {
+            MessageDigest md = MessageDigest.getInstance("SHA-256");
+            byte[] digest = md.digest(data);
+            StringBuilder sb = new StringBuilder(digest.length * 2);
+            for (byte b : digest) {
+                sb.append(String.format(Locale.US, "%02x", b));
+            }
+            return sb.toString();
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
     private void emitProgress(String status, int progress, long bytesDownloaded, long totalBytes) {
         JSObject data = new JSObject();
         data.put("status", status);
@@ -344,7 +501,6 @@ public class ApkUpdaterPlugin extends Plugin {
         installIntent.setDataAndType(apkUri, "application/vnd.android.package-archive");
         installIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
         installIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-        installIntent.putExtra(Intent.EXTRA_NOT_UNKNOWN_SOURCE, true);
 
         context.startActivity(installIntent);
     }

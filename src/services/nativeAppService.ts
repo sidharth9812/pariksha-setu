@@ -6,8 +6,8 @@ export const ANDROID_PACKAGE_ID = 'com.parikshasetu.app';
 export const DEFAULT_GITHUB_REPO = 'sidharth9812/pariksha-setu';
 export const STABLE_VERSION_MANIFEST_URL =
   'https://raw.githubusercontent.com/sidharth9812/pariksha-setu/main/public/version.json';
-export const DEFAULT_APP_VERSION = (import.meta as any).env?.VITE_APP_VERSION || '1.1.2';
-export const DEFAULT_APP_VERSION_CODE = Number((import.meta as any).env?.VITE_APP_VERSION_CODE) || 4;
+export const DEFAULT_APP_VERSION = (import.meta as any).env?.VITE_APP_VERSION || '1.1.3';
+export const DEFAULT_APP_VERSION_CODE = Number((import.meta as any).env?.VITE_APP_VERSION_CODE) || 5;
 export const BUILD_MODE = (import.meta as any).env?.VITE_BUILD_MODE || 'release';
 
 export interface AppVersionManifest {
@@ -215,11 +215,16 @@ export function isGenuinelyNewerRelease(
     return false;
   }
 
-  // 2. Require valid HTTPS download URL pointing to a release APK and strictly exclude debug builds
+  // 2. Require valid HTTPS download URL pointing exclusively to official GitHub Releases APK and exclude debug builds
   const downloadUrl = String(manifest.downloadUrl).trim();
+  const officialReleasePrefix = `https://github.com/${DEFAULT_GITHUB_REPO}/releases/download/`;
   try {
     const parsedUrl = new URL(downloadUrl);
-    if (parsedUrl.protocol !== 'https:') {
+    if (
+      parsedUrl.protocol !== 'https:' ||
+      parsedUrl.hostname.toLowerCase() !== 'github.com' ||
+      !downloadUrl.startsWith(officialReleasePrefix)
+    ) {
       return false;
     }
   } catch {
@@ -487,8 +492,13 @@ export async function downloadAndInstallOfficialApk(
     manifest.apkFileName || `ParikshaSetu-v${manifest.versionName}-release.apk`
   ).trim();
 
-  if (!cleanUrl.startsWith('https://') || cleanUrl.toLowerCase().includes('-debug.apk')) {
-    throw new Error('Invalid or non-production APK download URL.');
+  const officialReleasePrefix = `https://github.com/${DEFAULT_GITHUB_REPO}/releases/download/`;
+  if (
+    !cleanUrl.startsWith(officialReleasePrefix) ||
+    !cleanUrl.toLowerCase().endsWith('.apk') ||
+    cleanUrl.toLowerCase().includes('-debug.apk')
+  ) {
+    throw new Error('Blocked untrusted or non-production APK download URL.');
   }
 
   if (typeof navigator !== 'undefined' && !navigator.onLine) {
