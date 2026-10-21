@@ -115,8 +115,8 @@ export const StudentHome: React.FC<StudentHomeProps> = ({
   const [photoSuccess, setPhotoSuccess] = useState<string | null>(null);
 
   // App Version & Update Check State
-  const [installedVersion, setInstalledVersion] = useState<string>('1.0.0');
-  const [installedVersionCode, setInstalledVersionCode] = useState<number>(1);
+  const [installedVersion, setInstalledVersion] = useState<string>('1.1.0');
+  const [installedVersionCode, setInstalledVersionCode] = useState<number>(2);
   const [isCheckingUpdate, setIsCheckingUpdate] = useState(false);
   const [manualUpdateCheck, setManualUpdateCheck] = useState<AppUpdateCheckResult | null>(null);
 
