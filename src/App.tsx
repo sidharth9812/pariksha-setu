@@ -27,7 +27,7 @@ import { getTestByAccessCode, joinExamSession, findStudentAttempt } from './serv
 import { recordUserExamJoin } from './services/authService';
 import { getTestScheduleInfo } from './utils/scheduleHelper';
 import { initializeNativeApp } from './services/nativeAppService';
-import { OfflineIndicator } from './components/PWAInstallButton';
+import { OfflineIndicator, AppUpdateNotification } from './components/PWAInstallButton';
 
 function MainApp() {
   const { user, role, loading } = useAuth();
@@ -567,6 +567,7 @@ function MainApp() {
           setCurrentView('student-result');
         }}
       />
+      <AppUpdateNotification />
     </>
   );
 }

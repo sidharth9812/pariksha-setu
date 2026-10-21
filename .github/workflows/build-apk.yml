@@ -15,6 +15,19 @@ on:
         options:
           - debug
           - release
+      publish_release:
+        description: 'Publish signed Release APK & version.json to GitHub Releases (only applies to release build)'
+        required: false
+        default: true
+        type: boolean
+      release_notes:
+        description: 'Optional release notes for version.json & GitHub Release'
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -54,8 +67,13 @@ jobs:
           if [ -z "$APP_VERSION" ]; then
             APP_VERSION=$(node -p "require('./package.json').version || '1.0.0'")
           fi
+          APP_VERSION_CODE=$(grep -E 'versionCode\s+[0-9]+' android/app/build.gradle | head -n 1 | sed -E 's/.*versionCode\s+([0-9]+).*/\1/')
+          if [ -z "$APP_VERSION_CODE" ]; then
+            APP_VERSION_CODE="1"
+          fi
           echo "version=$APP_VERSION" >> "$GITHUB_OUTPUT"
-          echo "Resolved build mode and version: v$APP_VERSION"
+          echo "version_code=$APP_VERSION_CODE" >> "$GITHUB_OUTPUT"
+          echo "Resolved build mode: $(grep mode= "$GITHUB_OUTPUT" | cut -d= -f2), version: v$APP_VERSION (code $APP_VERSION_CODE)"
 
       - name: Install NPM Dependencies
         run: npm ci
@@ -64,6 +82,11 @@ jobs:
         run: node scripts/generate-icons.js
 
       - name: Build Web Application
+        env:
+          VITE_GITHUB_REPO: ${{ github.repository }}
+          VITE_APP_VERSION: ${{ steps.meta.outputs.version }}
+          VITE_APP_VERSION_CODE: ${{ steps.meta.outputs.version_code }}
+          VITE_BUILD_MODE: ${{ steps.meta.outputs.mode }}
         run: npm run build
 
       - name: Sync Capacitor Android
@@ -102,6 +125,11 @@ jobs:
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
           KEYSTORE_FILE: release.keystore
+          APP_VER: ${{ steps.meta.outputs.version }}
+          APP_VER_CODE: ${{ steps.meta.outputs.version_code }}
+          APK_FILE: ParikshaSetu-v${{ steps.meta.outputs.version }}-release.apk
+          DL_URL: ${{ github.server_url }}/${{ github.repository }}/releases/download/v${{ steps.meta.outputs.version }}/ParikshaSetu-v${{ steps.meta.outputs.version }}-release.apk
+          REL_NOTES: ${{ inputs.release_notes || format('ParikshaSetu v{0} signed production Android release.', steps.meta.outputs.version) }}
         run: |
           echo "Decoding production keystore into temporary file..."
           echo "$KEYSTORE_BASE64" | base64 --decode > android/app/release.keystore
@@ -114,8 +142,24 @@ jobs:
             exit 1
           fi
           mkdir -p build-output
-          cp android/app/build/outputs/apk/release/app-release.apk "build-output/ParikshaSetu-v${{ steps.meta.outputs.version }}-release.apk"
-          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose "build-output/ParikshaSetu-v${{ steps.meta.outputs.version }}-release.apk"
+          cp android/app/build/outputs/apk/release/app-release.apk "build-output/$APK_FILE"
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose "build-output/$APK_FILE"
+
+          # Generate release version.json manifest using the repository's actual configuration
+          export PUB_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          node -e '
+            const fs = require("fs");
+            const manifest = {
+              appId: "com.parikshasetu.app",
+              versionName: process.env.APP_VER,
+              versionCode: Number(process.env.APP_VER_CODE) || 1,
+              apkFileName: process.env.APK_FILE,
+              downloadUrl: process.env.DL_URL,
+              releaseNotes: process.env.REL_NOTES,
+              publishedAt: process.env.PUB_AT
+            };
+            fs.writeFileSync("build-output/version.json", JSON.stringify(manifest, null, 2) + "\n");
+          '
 
       - name: Cleanup Temporary Keystore Files
         if: always()
@@ -123,10 +167,27 @@ jobs:
           rm -f android/app/release.keystore
           rm -f *.keystore *.jks
 
-      - name: Upload APK Artifact
+      - name: Upload APK & Manifest Artifact
         uses: actions/upload-artifact@v4
         with:
           name: ParikshaSetu-${{ steps.meta.outputs.mode }}-v${{ steps.meta.outputs.version }}
-          path: build-output/ParikshaSetu-v${{ steps.meta.outputs.version }}-${{ steps.meta.outputs.mode }}.apk
+          path: build-output/*
           retention-days: 30
           if-no-files-found: error
+
+      - name: Publish Signed Release APK & Version Manifest to GitHub Releases
+        if: steps.meta.outputs.mode == 'release' && inputs.publish_release != false
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: v${{ steps.meta.outputs.version }}
+          APK_PATH: build-output/ParikshaSetu-v${{ steps.meta.outputs.version }}-release.apk
+          MANIFEST_PATH: build-output/version.json
+          REL_NOTES: ${{ inputs.release_notes || format('ParikshaSetu v{0} signed production Android release.', steps.meta.outputs.version) }}
+        run: |
+          if gh release view "$TAG_NAME" >/dev/null 2>&1; then
+            gh release upload "$TAG_NAME" "$APK_PATH" "$MANIFEST_PATH" --clobber
+            gh release edit "$TAG_NAME" --title "ParikshaSetu $TAG_NAME" --notes "$REL_NOTES" --latest
+          else
+            gh release create "$TAG_NAME" "$APK_PATH" "$MANIFEST_PATH" --title "ParikshaSetu $TAG_NAME" --notes "$REL_NOTES" --latest
+          fi
+

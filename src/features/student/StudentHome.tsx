@@ -69,6 +69,13 @@ import {
   getPendingOfflineAttempts,
   syncPendingOfflineAttempts,
 } from '../../services/offlineStorageService';
+import {
+  checkForAppUpdate,
+  getInstalledAppVersion,
+  openOfficialApkDownload,
+  ANDROID_PACKAGE_ID,
+  AppUpdateCheckResult,
+} from '../../services/nativeAppService';
 
 interface StudentHomeProps {
   onSelectTest: (test: TestItem) => void;
@@ -106,6 +113,29 @@ export const StudentHome: React.FC<StudentHomeProps> = ({
   const [photoUploadProgress, setPhotoUploadProgress] = useState(0);
   const [photoError, setPhotoError] = useState<string | null>(null);
   const [photoSuccess, setPhotoSuccess] = useState<string | null>(null);
+
+  // App Version & Update Check State
+  const [installedVersion, setInstalledVersion] = useState<string>('1.0.0');
+  const [installedVersionCode, setInstalledVersionCode] = useState<number>(1);
+  const [isCheckingUpdate, setIsCheckingUpdate] = useState(false);
+  const [manualUpdateCheck, setManualUpdateCheck] = useState<AppUpdateCheckResult | null>(null);
+
+  useEffect(() => {
+    getInstalledAppVersion().then((info) => {
+      setInstalledVersion(info.versionName);
+      setInstalledVersionCode(info.versionCode);
+    });
+  }, []);
+
+  const handleManualUpdateCheck = async () => {
+    setIsCheckingUpdate(true);
+    try {
+      const result = await checkForAppUpdate();
+      setManualUpdateCheck(result);
+    } finally {
+      setIsCheckingUpdate(false);
+    }
+  };
 
   const handleProfilePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -2048,6 +2078,79 @@ export const StudentHome: React.FC<StudentHomeProps> = ({
                     Sign Out Now
                   </button>
                 </div>
+              </div>
+
+              {/* Application Version & APK Update Check Card */}
+              <div className="bg-white p-6 sm:p-8 rounded-3xl border border-slate-200 shadow-xs space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div>
+                    <h3 className="text-base font-bold text-slate-900">Application Version &amp; Updates</h3>
+                    <p className="text-xs text-slate-500">
+                      Package ID: <span className="font-mono text-slate-700">{ANDROID_PACKAGE_ID}</span> &bull; Installed: <strong className="text-slate-800">v{installedVersion} (Build {installedVersionCode})</strong>
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleManualUpdateCheck}
+                    disabled={isCheckingUpdate}
+                    className="inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 disabled:opacity-60 text-white text-xs font-bold transition-colors cursor-pointer shrink-0"
+                  >
+                    <RotateCw className={`w-3.5 h-3.5 ${isCheckingUpdate ? 'animate-spin' : ''}`} />
+                    <span>{isCheckingUpdate ? 'Checking...' : 'Check for Updates'}</span>
+                  </button>
+                </div>
+
+                {manualUpdateCheck && (
+                  <div
+                    className={`p-4 rounded-2xl border text-xs space-y-3 ${
+                      manualUpdateCheck.updateAvailable
+                        ? 'bg-indigo-50/80 border-indigo-200 text-indigo-950'
+                        : 'bg-slate-50 border-slate-200 text-slate-700'
+                    }`}
+                  >
+                    {manualUpdateCheck.updateAvailable && manualUpdateCheck.latestManifest ? (
+                      <>
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                          <div>
+                            <div className="font-bold text-sm text-indigo-950 flex items-center gap-2">
+                              <span>New Version Available: v{manualUpdateCheck.latestManifest.versionName}</span>
+                              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">
+                                Signed Release APK
+                              </span>
+                            </div>
+                            {manualUpdateCheck.latestManifest.releaseNotes && (
+                              <p className="text-xs text-slate-600 mt-1">
+                                {manualUpdateCheck.latestManifest.releaseNotes}
+                              </p>
+                            )}
+                          </div>
+                          <a
+                            href={manualUpdateCheck.latestManifest.downloadUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              openOfficialApkDownload(manualUpdateCheck.latestManifest!.downloadUrl);
+                            }}
+                            className="inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs shadow-xs transition-colors cursor-pointer shrink-0"
+                          >
+                            <Download className="w-3.5 h-3.5" />
+                            <span>Download Update</span>
+                            <ExternalLink className="w-3 h-3" />
+                          </a>
+                        </div>
+                        <p className="text-[11px] text-slate-500">
+                          Installing the downloaded APK updates ParikshaSetu in-place via Android&apos;s package installer without clearing your offline tests or account data.
+                        </p>
+                      </>
+                    ) : (
+                      <div className="flex items-center gap-2 font-semibold text-slate-700">
+                        <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                        <span>{manualUpdateCheck.statusMessage || `ParikshaSetu v${installedVersion} is up to date.`}</span>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
           )}
