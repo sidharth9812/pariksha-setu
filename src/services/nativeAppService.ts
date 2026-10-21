@@ -117,7 +117,7 @@ export async function getInstalledAppVersion(): Promise<InstalledAppVersion> {
 }
 
 /**
- * Compares two semantic version strings (e.g. "1.2.0" vs "1.0.0" or "v1.0.1" vs "1.0.0").
+ * Compares two semantic version strings (e.g. "1.1.0" vs "1.0.0" or "v1.0.1" vs "1.0.0").
  * Returns:
  *   1 if remoteVer > currentVer
  *  -1 if remoteVer < currentVer
@@ -176,18 +176,29 @@ export function isGenuinelyNewerRelease(
   }
 
   // 1. Enforce exact Android package ID
-  if (manifest.appId && manifest.appId !== ANDROID_PACKAGE_ID) {
+  if (manifest.appId !== ANDROID_PACKAGE_ID) {
     return false;
   }
 
-  // 2. Require valid HTTPS download URL and strictly exclude debug builds
+  // 2. Require valid HTTPS download URL pointing to a release APK and strictly exclude debug builds
   const downloadUrl = String(manifest.downloadUrl).trim();
-  if (!downloadUrl.startsWith('https://')) {
+  try {
+    const parsedUrl = new URL(downloadUrl);
+    if (parsedUrl.protocol !== 'https:') {
+      return false;
+    }
+  } catch {
     return false;
   }
+
   const lowerUrl = downloadUrl.toLowerCase();
   const lowerFile = String(manifest.apkFileName || '').toLowerCase();
-  if (lowerUrl.includes('-debug.apk') || lowerUrl.includes('/debug/') || lowerFile.includes('-debug.apk')) {
+  if (
+    !lowerUrl.endsWith('.apk') ||
+    lowerUrl.includes('-debug.apk') ||
+    lowerUrl.includes('/debug/') ||
+    lowerFile.includes('-debug.apk')
+  ) {
     return false;
   }
 
@@ -211,21 +222,17 @@ export function isGenuinelyNewerRelease(
 }
 
 /**
- * Helper to fetch JSON with a strict timeout and cache: 'no-store'
- * so network errors never hang or block app startup.
+ * Helper to fetch the public JSON manifest without authentication, tokens, or cookies,
+ * using a strict timeout and cache: 'no-store' so network errors never block app startup.
  */
-async function fetchJsonWithTimeout<T>(url: string, timeoutMs = 8000): Promise<T | null> {
+async function fetchPublicJsonManifest<T>(url: string, timeoutMs = 8000): Promise<T | null> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const separator = url.includes('?') ? '&' : '?';
-    const bustUrl = `${url}${separator}_t=${Date.now()}`;
-    const response = await fetch(bustUrl, {
+    const response = await fetch(url, {
       method: 'GET',
       cache: 'no-store',
-      headers: {
-        Accept: 'application/json',
-      },
+      credentials: 'omit',
       signal: controller.signal,
     });
     if (!response.ok) {
@@ -242,20 +249,24 @@ async function fetchJsonWithTimeout<T>(url: string, timeoutMs = 8000): Promise<T
 /**
  * Parses a raw JSON manifest object into a normalized AppVersionManifest.
  */
-function parseManifestObject(raw: any): AppVersionManifest | null {
+export function parseManifestObject(raw: any): AppVersionManifest | null {
   if (!raw || typeof raw !== 'object') return null;
 
-  const versionName = String(raw.versionName || raw.version || raw.tag_name || '')
+  const versionName = String(raw.versionName || raw.version || '')
     .trim()
     .replace(/^[vV]/, '');
   if (!versionName) return null;
 
-  const versionCode = Number(raw.versionCode || raw.buildNumber || 0) || 0;
-  const appId = String(raw.appId || raw.packageId || ANDROID_PACKAGE_ID).trim();
-  const downloadUrl = String(raw.downloadUrl || raw.apkUrl || raw.url || '').trim();
-  const apkFileName = raw.apkFileName ? String(raw.apkFileName).trim() : `ParikshaSetu-v${versionName}-release.apk`;
-  const releaseNotes = raw.releaseNotes || raw.notes || raw.body ? String(raw.releaseNotes || raw.notes || raw.body).trim() : undefined;
-  const publishedAt = raw.publishedAt || raw.published_at || raw.releaseDate ? String(raw.publishedAt || raw.published_at || raw.releaseDate) : undefined;
+  const versionCode = Number(raw.versionCode || 0) || 0;
+  const appId = String(raw.appId || '').trim();
+  const downloadUrl = String(raw.downloadUrl || '').trim();
+  if (!appId || !downloadUrl) return null;
+
+  const apkFileName = raw.apkFileName
+    ? String(raw.apkFileName).trim()
+    : `ParikshaSetu-v${versionName}-release.apk`;
+  const releaseNotes = raw.releaseNotes ? String(raw.releaseNotes).trim() : undefined;
+  const publishedAt = raw.publishedAt ? String(raw.publishedAt).trim() : undefined;
 
   return {
     appId,
@@ -269,12 +280,13 @@ function parseManifestObject(raw: any): AppVersionManifest | null {
 }
 
 /**
- * Checks for a genuinely newer production release APK using the stable
+ * Checks for a genuinely newer production release APK using the public
  * GitHub-hosted release/version manifest:
  * https://raw.githubusercontent.com/sidharth9812/pariksha-setu/main/public/version.json
  *
- * Excludes debug builds from production update notifications, never blocks app startup,
- * and handles offline/network errors silently.
+ * Uses unauthenticated HTTPS GET (no GitHub token), excludes debug builds from
+ * production update notifications, never blocks app startup, and handles
+ * offline/network errors gracefully.
  */
 export async function checkForAppUpdate(options?: {
   customManifestUrl?: string;
@@ -312,7 +324,7 @@ export async function checkForAppUpdate(options?: {
   ).trim();
 
   try {
-    const rawData = await fetchJsonWithTimeout<any>(manifestUrl);
+    const rawData = await fetchPublicJsonManifest<any>(manifestUrl);
     const manifest = parseManifestObject(rawData);
 
     if (manifest) {
