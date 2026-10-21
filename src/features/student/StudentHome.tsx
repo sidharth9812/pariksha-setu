@@ -73,6 +73,8 @@ import {
   checkForAppUpdate,
   getInstalledAppVersion,
   ANDROID_PACKAGE_ID,
+  DEFAULT_APP_VERSION,
+  DEFAULT_APP_VERSION_CODE,
   AppUpdateCheckResult,
 } from '../../services/nativeAppService';
 import { InAppUpdateActionPanel } from '../../components/PWAInstallButton';
@@ -115,8 +117,8 @@ export const StudentHome: React.FC<StudentHomeProps> = ({
   const [photoSuccess, setPhotoSuccess] = useState<string | null>(null);
 
   // App Version & Update Check State
-  const [installedVersion, setInstalledVersion] = useState<string>('1.1.0');
-  const [installedVersionCode, setInstalledVersionCode] = useState<number>(2);
+  const [installedVersion, setInstalledVersion] = useState<string>(DEFAULT_APP_VERSION);
+  const [installedVersionCode, setInstalledVersionCode] = useState<number>(DEFAULT_APP_VERSION_CODE);
   const [isCheckingUpdate, setIsCheckingUpdate] = useState(false);
   const [manualUpdateCheck, setManualUpdateCheck] = useState<AppUpdateCheckResult | null>(null);
 
