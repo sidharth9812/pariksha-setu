@@ -185,15 +185,25 @@ jobs:
             fi
           fi
 
+          if [ -z "$ACTUAL_DL_URL" ] || [[ "$ACTUAL_DL_URL" != https://* ]]; then
+            echo "::error::Refusing to publish version.json with an empty or invalid downloadUrl ($ACTUAL_DL_URL)."
+            exit 1
+          fi
+
           # 3. Generate version.json with the actual release asset URL
           node -e '
             const fs = require("fs");
+            const downloadUrl = (process.env.ACTUAL_DL_URL || "").trim();
+            if (!downloadUrl || !downloadUrl.startsWith("https://")) {
+              console.error("Invalid or empty downloadUrl");
+              process.exit(1);
+            }
             const manifest = {
               appId: "com.parikshasetu.app",
               versionName: process.env.APP_VER,
               versionCode: Number(process.env.APP_VER_CODE) || 1,
               apkFileName: process.env.APK_FILE,
-              downloadUrl: process.env.ACTUAL_DL_URL,
+              downloadUrl,
               releaseNotes: process.env.REL_NOTES,
               publishedAt: process.env.PUB_AT
             };
