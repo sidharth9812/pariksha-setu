@@ -6,8 +6,8 @@ export const ANDROID_PACKAGE_ID = 'com.parikshasetu.app';
 export const DEFAULT_GITHUB_REPO = 'sidharth9812/pariksha-setu';
 export const STABLE_VERSION_MANIFEST_URL =
   'https://raw.githubusercontent.com/sidharth9812/pariksha-setu/main/public/version.json';
-export const DEFAULT_APP_VERSION = (import.meta as any).env?.VITE_APP_VERSION || '1.1.5';
-export const DEFAULT_APP_VERSION_CODE = Number((import.meta as any).env?.VITE_APP_VERSION_CODE) || 7;
+export const DEFAULT_APP_VERSION = (import.meta as any).env?.VITE_APP_VERSION || '1.1.6';
+export const DEFAULT_APP_VERSION_CODE = Number((import.meta as any).env?.VITE_APP_VERSION_CODE) || 8;
 export const BUILD_MODE = (import.meta as any).env?.VITE_BUILD_MODE || 'release';
 
 export interface AppVersionManifest {

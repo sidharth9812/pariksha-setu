@@ -29,7 +29,10 @@ import {
 } from '../../services/examService';
 import { useAuth } from '../../context/AuthContext';
 import { CachedImage } from '../../components/common/CachedImage';
-import { FormattedQuestionText } from '../../utils/questionTextFormatter';
+import {
+  FormattedQuestionText,
+  prefixQuestionWithNumber,
+} from '../../utils/questionTextFormatter';
 
 interface LiveExamScreenProps {
   test: TestItem;
@@ -158,6 +161,43 @@ export const LiveExamScreen: React.FC<LiveExamScreenProps> = ({
   });
 
   const startTimeRef = useRef<string>(new Date().toISOString());
+  const headerRef = useRef<HTMLElement>(null);
+  const [headerHeight, setHeaderHeight] = useState<number>(88);
+
+  // Measure dynamic top header height for sticky Question navigation
+  useEffect(() => {
+    const updateHeaderHeight = () => {
+      if (headerRef.current) {
+        setHeaderHeight(headerRef.current.offsetHeight);
+      }
+    };
+
+    updateHeaderHeight();
+
+    let resizeObserver: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== 'undefined' && headerRef.current) {
+      resizeObserver = new ResizeObserver(() => {
+        updateHeaderHeight();
+      });
+      resizeObserver.observe(headerRef.current);
+    }
+
+    window.addEventListener('resize', updateHeaderHeight);
+    window.addEventListener('orientationchange', updateHeaderHeight);
+
+    return () => {
+      if (resizeObserver) {
+        resizeObserver.disconnect();
+      }
+      window.removeEventListener('resize', updateHeaderHeight);
+      window.removeEventListener('orientationchange', updateHeaderHeight);
+    };
+  }, []);
+
+  // Smooth scroll to top when navigating between questions
+  useEffect(() => {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }, [currentIndex]);
 
   // Load questions
   useEffect(() => {
@@ -498,7 +538,10 @@ export const LiveExamScreen: React.FC<LiveExamScreenProps> = ({
       {/* =========================================================
           TOP UTILITY CONTEXT BAR (Aspirant Neo Exam Header)
       ========================================================= */}
-      <header className="sticky top-0 z-40 bg-surface/95 backdrop-blur-md border-b border-outline-variant/20">
+      <header
+        ref={headerRef}
+        className="sticky top-0 z-30 bg-surface/95 backdrop-blur-md border-b border-outline-variant/20"
+      >
         {/* Row 1: Exam Title, Language Toggle, Countdown Timer Pill & Submit */}
         <div className="max-w-5xl mx-auto px-4 py-2.5 flex items-center justify-between gap-2">
           <div className="flex flex-col min-w-0 flex-1">
@@ -615,8 +658,11 @@ export const LiveExamScreen: React.FC<LiveExamScreenProps> = ({
       <main className="flex-1 max-w-4xl w-full mx-auto px-4 pt-4 pb-28 space-y-4">
         {currentQuestion ? (
           <>
-            {/* Question Meta Header Card */}
-            <div className="flex items-center justify-between bg-surface-container-lowest p-3.5 rounded-xl shadow-2xs border border-outline-variant/15">
+            {/* Sticky Question Meta Header (stays visible on scroll below top navigation) */}
+            <div
+              className="sticky z-20 bg-surface/95 backdrop-blur-md p-3 sm:p-3.5 rounded-xl shadow-xs border border-outline-variant/20 flex items-center justify-between gap-2 transition-all"
+              style={{ top: `${headerHeight}px` }}
+            >
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="font-headline font-extrabold text-sm text-primary tabular-nums">
                   Question {currentIndex + 1} of {questions.length}
@@ -629,7 +675,7 @@ export const LiveExamScreen: React.FC<LiveExamScreenProps> = ({
               <button
                 type="button"
                 onClick={handleToggleReview}
-                className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-headline font-semibold transition-colors cursor-pointer ${
+                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-headline font-semibold transition-colors cursor-pointer ${
                   markedForReview.includes(currentQuestion.id)
                     ? 'bg-tertiary-fixed text-on-tertiary-fixed font-bold'
                     : 'text-on-surface-variant hover:text-primary hover:bg-surface-container-low'
@@ -660,8 +706,9 @@ export const LiveExamScreen: React.FC<LiveExamScreenProps> = ({
               {(languageMode === 'both' || languageMode === 'en') &&
                 currentQuestion.questionText && (
                   <FormattedQuestionText
-                    text={currentQuestion.questionText}
-                    className="text-[15px] sm:text-base leading-relaxed font-medium text-on-surface"
+                    text={prefixQuestionWithNumber(currentQuestion.questionText, currentIndex + 1)}
+                    className="text-[15px] sm:text-base leading-relaxed font-bold text-on-surface"
+                    paragraphClassName="font-bold text-on-surface"
                   />
                 )}
 
@@ -676,8 +723,17 @@ export const LiveExamScreen: React.FC<LiveExamScreenProps> = ({
                     }
                   >
                     <FormattedQuestionText
-                      text={currentQuestion.questionTextHindi}
-                      className="text-sm sm:text-[15px] leading-relaxed font-normal text-on-surface-variant"
+                      text={prefixQuestionWithNumber(currentQuestion.questionTextHindi, currentIndex + 1)}
+                      className={
+                        languageMode === 'both'
+                          ? 'text-sm sm:text-[15px] leading-relaxed font-bold text-on-surface-variant'
+                          : 'text-[15px] sm:text-base leading-relaxed font-bold text-on-surface'
+                      }
+                      paragraphClassName={
+                        languageMode === 'both'
+                          ? 'font-bold text-on-surface-variant'
+                          : 'font-bold text-on-surface'
+                      }
                     />
                   </div>
                 )}

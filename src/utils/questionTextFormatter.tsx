@@ -93,6 +93,27 @@ export function formatSmartQuestionDisplay(raw?: string): string {
   return text.replace(/\n{3,}/g, '\n\n').trim();
 }
 
+/**
+ * Strips any pre-existing question number prefix from text (e.g. "Q1.", "Q.1", "1.", "Question 1:", "प्रश्न 1.")
+ * and prepends standard prefix "Q{questionNumber}. " consistently.
+ */
+export function prefixQuestionWithNumber(raw?: string, questionNumber?: number): string {
+  if (!raw) return '';
+  const text = String(raw).trim();
+  if (typeof questionNumber !== 'number' || isNaN(questionNumber)) {
+    return text;
+  }
+
+  // Detect and strip existing leading question prefix:
+  // e.g. "Q1.", "Q 1.", "Q.1:", "Question 1.", "Question 1:", "प्रश्न 1.", "प्र. 1.", "1.", "1)", "1 -"
+  const stripped = text.replace(
+    /^(?:(?:Q|Question|प्रश्न|प्र)\.?\s*\d+[\.\):—\-]|^\d+[\.\):—\-])\s*/i,
+    ''
+  );
+
+  return `Q${questionNumber}. ${stripped}`;
+}
+
 interface FormattedQuestionTextProps {
   text?: string;
   className?: string;
@@ -127,7 +148,7 @@ export const FormattedQuestionText: React.FC<FormattedQuestionTextProps> = ({
       {paragraphs.map((para, idx) => (
         <p
           key={idx}
-          className={`whitespace-pre-wrap break-words ${paragraphClassName}`}
+          className={`whitespace-pre-wrap break-words ${paragraphClassName || className}`}
         >
           {para}
         </p>

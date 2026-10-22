@@ -25,7 +25,10 @@ import {
 } from '../../services/examService';
 import { CachedImage } from '../../components/common/CachedImage';
 import { getDownloadedQuestions } from '../../services/offlineStorageService';
-import { FormattedQuestionText } from '../../utils/questionTextFormatter';
+import {
+  FormattedQuestionText,
+  prefixQuestionWithNumber,
+} from '../../utils/questionTextFormatter';
 
 interface StudentAnswerKeyViewProps {
   attempt: StudentAttempt;
@@ -195,6 +198,10 @@ export const StudentAnswerKeyView: React.FC<StudentAnswerKeyViewProps> = ({
     setSelectedQuestionId(qId);
     setIsPaletteOpen(false);
   };
+
+  useEffect(() => {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }, [selectedQuestionId]);
 
   if (loading) {
     return (
@@ -460,8 +467,8 @@ export const StudentAnswerKeyView: React.FC<StudentAnswerKeyViewProps> = ({
 
                 return (
                   <>
-                    {/* Question Diagnostic Header Card */}
-                    <div className="bg-surface-container-lowest p-4 rounded-xl border border-outline-variant/15 flex flex-col gap-3 shadow-2xs">
+                    {/* Question Diagnostic Header Card (Sticky below filters) */}
+                    <div className="sticky top-[104px] z-20 bg-surface/95 backdrop-blur-md p-4 rounded-xl border border-outline-variant/20 flex flex-col gap-3 shadow-xs transition-all">
                       <div className="flex flex-wrap items-center justify-between gap-2">
                         <div className="flex items-center gap-2 flex-wrap">
                           <span className="font-headline font-extrabold text-primary text-sm bg-primary/10 px-3 py-1 rounded-md tabular-nums">
@@ -538,8 +545,9 @@ export const StudentAnswerKeyView: React.FC<StudentAnswerKeyViewProps> = ({
                       {(languageMode === 'both' || languageMode === 'en') &&
                         currentQuestion.questionText && (
                           <FormattedQuestionText
-                            text={currentQuestion.questionText}
-                            className="text-[15px] sm:text-base leading-relaxed text-on-surface font-medium"
+                            text={prefixQuestionWithNumber(currentQuestion.questionText, displayQNum)}
+                            className="text-[15px] sm:text-base leading-relaxed text-on-surface font-bold"
+                            paragraphClassName="font-bold text-on-surface"
                           />
                         )}
 
@@ -553,8 +561,17 @@ export const StudentAnswerKeyView: React.FC<StudentAnswerKeyViewProps> = ({
                             }
                           >
                             <FormattedQuestionText
-                              text={currentQuestion.questionTextHindi}
-                              className="text-[15px] sm:text-base leading-relaxed text-on-surface font-medium"
+                              text={prefixQuestionWithNumber(currentQuestion.questionTextHindi, displayQNum)}
+                              className={
+                                languageMode === 'both'
+                                  ? 'text-sm sm:text-[15px] leading-relaxed text-on-surface-variant font-bold'
+                                  : 'text-[15px] sm:text-base leading-relaxed text-on-surface font-bold'
+                              }
+                              paragraphClassName={
+                                languageMode === 'both'
+                                  ? 'font-bold text-on-surface-variant'
+                                  : 'font-bold text-on-surface'
+                              }
                             />
                           </div>
                         )}
