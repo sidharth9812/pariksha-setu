@@ -262,7 +262,7 @@ export const WaitingRoom: React.FC<WaitingRoomProps> = ({
           )}
 
           {currentTest.syllabus && (
-            <div className="mt-2 p-3.5 bg-indigo-50/60 rounded-xl border border-indigo-100 text-xs text-indigo-900">
+            <div className="mt-2 p-3.5 bg-indigo-50/60 rounded-xl border border-indigo-100 text-xs text-indigo-900 whitespace-pre-wrap">
               <span className="font-bold text-indigo-950 block mb-0.5">Syllabus Covered:</span>
               {currentTest.syllabus}
             </div>

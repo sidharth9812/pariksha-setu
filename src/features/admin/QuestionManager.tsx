@@ -27,6 +27,9 @@ import {
   uploadOptionImageToCloudinary,
 } from '../../services/cloudinaryService';
 import { DualLanguageBulkCsvModal } from './DualLanguageBulkCsvModal';
+import { FormattedQuestionText, preserveQuestionFormatting } from '../../utils/questionTextFormatter';
+import { parseLanguageCsv } from '../../utils/csvQuestionParser';
+import { Sparkles } from 'lucide-react';
 
 interface QuestionManagerProps {
   test: TestItem;
@@ -37,6 +40,8 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({ test, onBack }
   const [questions, setQuestions] = useState<QuestionItem[]>([]);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isBulkModalOpen, setIsBulkModalOpen] = useState(false);
+  const [bulkInitialEnglish, setBulkInitialEnglish] = useState<string | undefined>(undefined);
+  const [bulkInitialHindi, setBulkInitialHindi] = useState<string | undefined>(undefined);
   const [editingQuestion, setEditingQuestion] = useState<QuestionItem | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -252,27 +257,27 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({ test, onBack }
     const payload: Partial<QuestionItem> = {
       testId: test.id,
       questionNumber: editingQuestion ? editingQuestion.questionNumber : questions.length + 1,
-      questionText: questionText.trim(),
-      questionTextHindi: questionTextHindi.trim() || undefined,
+      questionText: preserveQuestionFormatting(questionText),
+      questionTextHindi: preserveQuestionFormatting(questionTextHindi) || undefined,
       options: {
-        A: optA.trim(),
-        B: optB.trim(),
-        C: optC.trim(),
-        D: optD.trim(),
+        A: preserveQuestionFormatting(optA),
+        B: preserveQuestionFormatting(optB),
+        C: preserveQuestionFormatting(optC),
+        D: preserveQuestionFormatting(optD),
       },
       optionsHindi:
         optAHindi || optBHindi || optCHindi || optDHindi
           ? {
-              A: optAHindi.trim(),
-              B: optBHindi.trim(),
-              C: optCHindi.trim(),
-              D: optDHindi.trim(),
+              A: preserveQuestionFormatting(optAHindi),
+              B: preserveQuestionFormatting(optBHindi),
+              C: preserveQuestionFormatting(optCHindi),
+              D: preserveQuestionFormatting(optDHindi),
             }
           : undefined,
       optionImages: Object.keys(cleanedOptionImages).length > 0 ? cleanedOptionImages : undefined,
       correctAnswer,
-      explanation: explanation.trim() || undefined,
-      explanationHindi: explanationHindi.trim() || undefined,
+      explanation: preserveQuestionFormatting(explanation) || undefined,
+      explanationHindi: preserveQuestionFormatting(explanationHindi) || undefined,
       subject: subject.trim() || 'General',
       questionImageUrl: questionImageUrl || undefined,
       questionImagePublicId: questionImagePublicId || undefined,
@@ -302,6 +307,53 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({ test, onBack }
     if (!confirm(`Delete question #${q.questionNumber}?`)) return;
     await deleteQuestion(test.id, q.id);
     await loadQuestions();
+  };
+
+  // Detect if pasted text in the Single Question Modal contains embedded options (A-D) or multiple questions
+  const detectedEnglishParsed = React.useMemo(() => {
+    if (!questionText.trim()) return [];
+    return parseLanguageCsv(questionText, 'en').filter(
+      (r) => r.questionText && r.optionA && r.optionB && r.optionC && r.optionD
+    );
+  }, [questionText]);
+
+  const detectedHindiParsed = React.useMemo(() => {
+    if (!questionTextHindi.trim()) return [];
+    return parseLanguageCsv(questionTextHindi, 'hi').filter(
+      (r) => r.questionText && r.optionA && r.optionB && r.optionC && r.optionD
+    );
+  }, [questionTextHindi]);
+
+  const handleExtractSingleEnglishQuestion = () => {
+    if (detectedEnglishParsed.length !== 1) return;
+    const item = detectedEnglishParsed[0];
+    setQuestionText(item.questionText);
+    setOptA(item.optionA);
+    setOptB(item.optionB);
+    setOptC(item.optionC);
+    setOptD(item.optionD);
+    if (item.correctAnswer) setCorrectAnswer(item.correctAnswer);
+    if (item.explanation && !explanation.trim()) setExplanation(item.explanation);
+    if (item.subject && (!subject.trim() || subject === 'General')) setSubject(item.subject);
+  };
+
+  const handleExtractSingleHindiQuestion = () => {
+    if (detectedHindiParsed.length !== 1) return;
+    const item = detectedHindiParsed[0];
+    setQuestionTextHindi(item.questionText);
+    setOptAHindi(item.optionA);
+    setOptBHindi(item.optionB);
+    setOptCHindi(item.optionC);
+    setOptDHindi(item.optionD);
+    if (item.correctAnswer) setCorrectAnswer(item.correctAnswer);
+    if (item.explanation && !explanationHindi.trim()) setExplanationHindi(item.explanation);
+  };
+
+  const handleMoveToBulkImporter = () => {
+    setBulkInitialEnglish(questionText.trim() || undefined);
+    setBulkInitialHindi(questionTextHindi.trim() || undefined);
+    setIsAddModalOpen(false);
+    setIsBulkModalOpen(true);
   };
 
   return (
@@ -381,11 +433,15 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({ test, onBack }
                     )}
                   </div>
                   {q.questionTextHindi && (
-                    <div className="font-bold text-sm sm:text-base text-slate-900 leading-snug">
-                      {q.questionTextHindi}
-                    </div>
+                    <FormattedQuestionText
+                      text={q.questionTextHindi}
+                      className="font-bold text-sm sm:text-base text-slate-900 leading-relaxed"
+                    />
                   )}
-                  <div className="text-xs sm:text-sm text-slate-700 leading-snug">{q.questionText}</div>
+                  <FormattedQuestionText
+                    text={q.questionText}
+                    className="text-xs sm:text-sm text-slate-700 leading-relaxed"
+                  />
 
                   {(q.questionImageUrl || q.imageUrl) && (
                     <div className="mt-2 max-w-sm rounded-xl overflow-hidden border border-slate-200">
@@ -434,13 +490,19 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({ test, onBack }
                         <div className="flex items-start gap-2 flex-wrap">
                           <span className="font-bold shrink-0">{key}.</span>
                           {optEng && optHi && optEng.trim() !== optHi.trim() ? (
-                            <span className="inline-flex items-center gap-1.5 flex-wrap">
-                              <span className="font-semibold text-slate-900">{optEng}</span>
+                            <span className="inline-flex items-start gap-1.5 flex-wrap">
+                              <FormattedQuestionText
+                                text={optEng}
+                                className="font-semibold text-slate-900"
+                              />
                               <span className="text-slate-400 font-bold">/</span>
-                              <span className="text-slate-700">{optHi}</span>
+                              <FormattedQuestionText
+                                text={optHi}
+                                className="text-slate-700"
+                              />
                             </span>
                           ) : optEng || optHi ? (
-                            <span>{optEng || optHi}</span>
+                            <FormattedQuestionText text={optEng || optHi} />
                           ) : (
                             <span className="italic text-slate-400">[Image Option]</span>
                           )}
@@ -468,11 +530,17 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({ test, onBack }
               </div>
 
               {(q.explanation || q.explanationHindi) && (
-                <div className="p-2.5 bg-slate-50 rounded-xl border border-slate-100 text-xs text-slate-600">
-                  <span className="font-semibold text-slate-800">Explanation: </span>
-                  {q.explanation && <span>{q.explanation}</span>}
-                  {q.explanation && q.explanationHindi && <span className="text-slate-400 mx-1.5 font-bold">/</span>}
-                  {q.explanationHindi && <span>{q.explanationHindi}</span>}
+                <div className="p-2.5 bg-slate-50 rounded-xl border border-slate-100 text-xs text-slate-600 space-y-1">
+                  <span className="font-semibold text-slate-800 block">Explanation: </span>
+                  {q.explanation && (
+                    <FormattedQuestionText text={q.explanation} className="leading-relaxed" />
+                  )}
+                  {q.explanationHindi && (
+                    <FormattedQuestionText
+                      text={q.explanationHindi}
+                      className="text-slate-700 leading-relaxed"
+                    />
+                  )}
                 </div>
               )}
             </div>
@@ -491,31 +559,99 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({ test, onBack }
             </div>
 
             <form onSubmit={handleSaveQuestion} className="p-6 space-y-4 max-h-[80vh] overflow-y-auto">
-              <div>
-                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+              <div className="space-y-1.5">
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">
                   Question Text (English) *
                 </label>
                 <textarea
                   required
-                  rows={2}
+                  rows={4}
                   value={questionText}
                   onChange={(e) => setQuestionText(e.target.value)}
-                  placeholder="Enter the question in English..."
-                  className="w-full px-3.5 py-2 border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
+                  placeholder="Enter or paste the question in English (line breaks and paragraphs are preserved)..."
+                  className="w-full px-3.5 py-2.5 border border-slate-300 rounded-xl text-sm leading-relaxed whitespace-pre-wrap focus:ring-2 focus:ring-indigo-500 outline-none"
                 />
+                {detectedEnglishParsed.length > 1 && (
+                  <div className="p-3 rounded-xl bg-indigo-50 border border-indigo-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs text-indigo-950">
+                    <div className="flex items-start gap-2">
+                      <Sparkles className="w-4 h-4 text-indigo-600 shrink-0 mt-0.5" />
+                      <span>
+                        <strong>{detectedEnglishParsed.length} questions with options detected!</strong> Open in Bulk Importer to separate and import all {detectedEnglishParsed.length} questions properly.
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleMoveToBulkImporter}
+                      className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-bold text-xs shrink-0 cursor-pointer"
+                    >
+                      Separate All {detectedEnglishParsed.length} Questions
+                    </button>
+                  </div>
+                )}
+                {detectedEnglishParsed.length === 1 && (
+                  <div className="p-2.5 rounded-xl bg-emerald-50 border border-emerald-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs text-emerald-950">
+                    <div className="flex items-center gap-2">
+                      <Sparkles className="w-4 h-4 text-emerald-600 shrink-0" />
+                      <span>
+                        Options (A, B, C, D) detected inside Question Text. Click to auto-fill the option boxes below!
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleExtractSingleEnglishQuestion}
+                      className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-bold text-xs shrink-0 cursor-pointer"
+                    >
+                      Extract Options (A–D)
+                    </button>
+                  </div>
+                )}
               </div>
 
-              <div>
-                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+              <div className="space-y-1.5">
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">
                   Question Text (Alternative / Secondary / Optional)
                 </label>
                 <textarea
-                  rows={2}
+                  rows={4}
                   value={questionTextHindi}
                   onChange={(e) => setQuestionTextHindi(e.target.value)}
-                  placeholder="Enter secondary or translated question text..."
-                  className="w-full px-3.5 py-2 border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
+                  placeholder="Enter or paste secondary/Hindi question text (line breaks and paragraphs are preserved)..."
+                  className="w-full px-3.5 py-2.5 border border-slate-300 rounded-xl text-sm leading-relaxed whitespace-pre-wrap focus:ring-2 focus:ring-indigo-500 outline-none"
                 />
+                {detectedHindiParsed.length > 1 && (
+                  <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs text-rose-950">
+                    <div className="flex items-start gap-2">
+                      <Sparkles className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                      <span>
+                        <strong>{detectedHindiParsed.length} Hindi questions detected!</strong> Open in Bulk Importer to separate and import all {detectedHindiParsed.length} questions properly.
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleMoveToBulkImporter}
+                      className="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-lg font-bold text-xs shrink-0 cursor-pointer"
+                    >
+                      Separate All {detectedHindiParsed.length} Questions
+                    </button>
+                  </div>
+                )}
+                {detectedHindiParsed.length === 1 && (
+                  <div className="p-2.5 rounded-xl bg-emerald-50 border border-emerald-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs text-emerald-950">
+                    <div className="flex items-center gap-2">
+                      <Sparkles className="w-4 h-4 text-emerald-600 shrink-0" />
+                      <span>
+                        Hindi Options (A, B, C, D) detected inside text. Click to auto-fill Hindi option boxes!
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleExtractSingleHindiQuestion}
+                      className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-bold text-xs shrink-0 cursor-pointer"
+                    >
+                      Extract Hindi Options (A–D)
+                    </button>
+                  </div>
+                )}
               </div>
 
               {/* Options */}
@@ -810,9 +946,15 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({ test, onBack }
       <DualLanguageBulkCsvModal
         test={test}
         isOpen={isBulkModalOpen}
-        onClose={() => setIsBulkModalOpen(false)}
+        onClose={() => {
+          setIsBulkModalOpen(false);
+          setBulkInitialEnglish(undefined);
+          setBulkInitialHindi(undefined);
+        }}
         onSuccess={loadQuestions}
         currentQuestionCount={questions.length}
+        initialEnglishText={bulkInitialEnglish}
+        initialHindiText={bulkInitialHindi}
       />
     </div>
   );

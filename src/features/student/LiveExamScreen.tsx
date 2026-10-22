@@ -33,6 +33,7 @@ import {
 } from '../../services/examService';
 import { useAuth } from '../../context/AuthContext';
 import { CachedImage } from '../../components/common/CachedImage';
+import { FormattedQuestionText } from '../../utils/questionTextFormatter';
 
 interface LiveExamScreenProps {
   test: TestItem;
@@ -603,15 +604,19 @@ export const LiveExamScreen: React.FC<LiveExamScreenProps> = ({
             <div className="px-4 sm:px-6 pt-2 pb-4 space-y-3">
               {/* Primary English question */}
               {(languageMode === 'both' || languageMode === 'en') && (
-                <div className="text-base sm:text-lg font-semibold text-slate-900 leading-relaxed font-sans">
-                  {currentQuestion.questionText}
-                </div>
+                <FormattedQuestionText
+                  text={currentQuestion.questionText}
+                  className="text-base sm:text-lg font-semibold text-slate-900 leading-relaxed font-sans"
+                />
               )}
 
               {/* Secondary/Alternative question */}
               {(languageMode === 'both' || languageMode === 'hi') && currentQuestion.questionTextHindi && (
-                <div className="text-sm sm:text-base text-slate-600 leading-relaxed pt-2 border-t border-slate-100">
-                  {currentQuestion.questionTextHindi}
+                <div className="pt-2 border-t border-slate-100">
+                  <FormattedQuestionText
+                    text={currentQuestion.questionTextHindi}
+                    className="text-sm sm:text-base text-slate-600 leading-relaxed"
+                  />
                 </div>
               )}
 
@@ -661,19 +666,31 @@ export const LiveExamScreen: React.FC<LiveExamScreenProps> = ({
                     </div>
 
                     {/* Option Content: Stacked with text above and image below */}
-                    <div className="flex-1 text-sm sm:text-base text-slate-800 space-y-2.5">
+                    <div className="flex-1 text-sm sm:text-base text-slate-800 space-y-2.5 min-w-0">
                       {(optEng || optHindi) && (
                         <div>
                           {languageMode === 'both' && optEng && optHindi && optEng.trim() !== optHindi.trim() ? (
-                            <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
-                              <span className="font-semibold text-slate-900">{optEng}</span>
+                            <div className="flex flex-wrap items-start gap-1.5 sm:gap-2">
+                              <FormattedQuestionText
+                                text={optEng}
+                                className="font-semibold text-slate-900"
+                              />
                               <span className="text-slate-400 font-bold">/</span>
-                              <span className="font-medium text-slate-800">{optHindi}</span>
+                              <FormattedQuestionText
+                                text={optHindi}
+                                className="font-medium text-slate-800"
+                              />
                             </div>
                           ) : languageMode === 'hi' ? (
-                            <div className="font-medium text-slate-900">{optHindi || optEng}</div>
+                            <FormattedQuestionText
+                              text={optHindi || optEng}
+                              className="font-medium text-slate-900"
+                            />
                           ) : (
-                            <div className="font-medium text-slate-900">{optEng || optHindi}</div>
+                            <FormattedQuestionText
+                              text={optEng || optHindi}
+                              className="font-medium text-slate-900"
+                            />
                           )}
                         </div>
                       )}

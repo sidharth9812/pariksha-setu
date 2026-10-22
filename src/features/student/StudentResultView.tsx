@@ -33,6 +33,7 @@ import {
 } from '../../services/examService';
 import { CachedImage } from '../../components/common/CachedImage';
 import { syncPendingOfflineAttempts, getDownloadedQuestions } from '../../services/offlineStorageService';
+import { FormattedQuestionText } from '../../utils/questionTextFormatter';
 
 interface StudentResultViewProps {
   attempt: StudentAttempt;
@@ -916,16 +917,18 @@ export const StudentResultView: React.FC<StudentResultViewProps> = ({
                             {/* Card Body */}
                             <div className="p-5 space-y-5">
                               {/* Question Text */}
-                              <div className="space-y-1.5">
+                              <div className="space-y-2">
                                 {currentQuestion.questionTextHindi && (
-                                  <p className="text-sm sm:text-base font-semibold text-slate-900 leading-relaxed">
-                                    {currentQuestion.questionTextHindi}
-                                  </p>
+                                  <FormattedQuestionText
+                                    text={currentQuestion.questionTextHindi}
+                                    className="text-sm sm:text-base font-semibold text-slate-900 leading-relaxed"
+                                  />
                                 )}
                                 {currentQuestion.questionText && (
-                                  <p className="text-xs sm:text-sm text-slate-700 leading-relaxed">
-                                    {currentQuestion.questionText}
-                                  </p>
+                                  <FormattedQuestionText
+                                    text={currentQuestion.questionText}
+                                    className="text-xs sm:text-sm text-slate-700 leading-relaxed"
+                                  />
                                 )}
                               </div>
 
@@ -981,14 +984,23 @@ export const StudentResultView: React.FC<StudentResultViewProps> = ({
                                                 {key}
                                               </span>
 
-                                              <div className="space-y-0.5">
+                                              <div className="space-y-0.5 min-w-0">
                                                 {optEng && optHi && optEng.trim() !== optHi.trim() ? (
                                                   <>
-                                                    <div className="font-semibold text-slate-900">{optEng}</div>
-                                                    <div className="text-slate-600 text-[11px]">{optHi}</div>
+                                                    <FormattedQuestionText
+                                                      text={optEng}
+                                                      className="font-semibold text-slate-900"
+                                                    />
+                                                    <FormattedQuestionText
+                                                      text={optHi}
+                                                      className="text-slate-600 text-[11px]"
+                                                    />
                                                   </>
                                                 ) : optEng || optHi ? (
-                                                  <div className="text-slate-900 font-medium">{optEng || optHi}</div>
+                                                  <FormattedQuestionText
+                                                    text={optEng || optHi}
+                                                    className="text-slate-900 font-medium"
+                                                  />
                                                 ) : (
                                                   <div className="italic text-slate-400 text-[11px]">[Image Option]</div>
                                                 )}
@@ -1144,10 +1156,16 @@ export const StudentResultView: React.FC<StudentResultViewProps> = ({
                                     <span>Explanation / Solution:</span>
                                   </span>
                                   {currentQuestion.explanation && (
-                                    <p className="text-slate-800 leading-relaxed">{currentQuestion.explanation}</p>
+                                    <FormattedQuestionText
+                                      text={currentQuestion.explanation}
+                                      className="text-slate-800 leading-relaxed"
+                                    />
                                   )}
                                   {currentQuestion.explanationHindi && (
-                                    <p className="text-slate-800 leading-relaxed pt-0.5">{currentQuestion.explanationHindi}</p>
+                                    <FormattedQuestionText
+                                      text={currentQuestion.explanationHindi}
+                                      className="text-slate-800 leading-relaxed pt-0.5"
+                                    />
                                   )}
                                 </div>
                               )}

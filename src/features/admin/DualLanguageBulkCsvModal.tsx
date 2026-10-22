@@ -28,6 +28,7 @@ import {
   SAMPLE_ENGLISH_CSV,
   SAMPLE_HINDI_CSV,
 } from '../../utils/csvQuestionParser';
+import { FormattedQuestionText } from '../../utils/questionTextFormatter';
 
 interface DualLanguageBulkCsvModalProps {
   test: TestItem;
@@ -35,6 +36,8 @@ interface DualLanguageBulkCsvModalProps {
   onClose: () => void;
   onSuccess: () => Promise<void>;
   currentQuestionCount: number;
+  initialEnglishText?: string;
+  initialHindiText?: string;
 }
 
 export const DualLanguageBulkCsvModal: React.FC<DualLanguageBulkCsvModalProps> = ({
@@ -43,6 +46,8 @@ export const DualLanguageBulkCsvModal: React.FC<DualLanguageBulkCsvModalProps> =
   onClose,
   onSuccess,
   currentQuestionCount,
+  initialEnglishText,
+  initialHindiText,
 }) => {
   // Input states: Raw text
   const [englishText, setEnglishText] = useState('');
@@ -77,6 +82,22 @@ export const DualLanguageBulkCsvModal: React.FC<DualLanguageBulkCsvModalProps> =
   // File Input Refs
   const englishFileInputRef = useRef<HTMLInputElement>(null);
   const hindiFileInputRef = useRef<HTMLInputElement>(null);
+
+  // Pre-populate when opened from multi-question paste in QuestionManager
+  useEffect(() => {
+    if (isOpen && (initialEnglishText || initialHindiText)) {
+      if (initialEnglishText) {
+        setEnglishText(initialEnglishText);
+        setEnglishFileName('Pasted_English_Questions.txt');
+      }
+      if (initialHindiText) {
+        setHindiText(initialHindiText);
+        setHindiFileName('Pasted_Hindi_Questions.txt');
+      }
+      setInputMode('paste');
+      setActiveTab('preview');
+    }
+  }, [isOpen, initialEnglishText, initialHindiText]);
 
   // Re-run auto settlement whenever englishText or hindiText changes
   useEffect(() => {
@@ -421,14 +442,14 @@ export const DualLanguageBulkCsvModal: React.FC<DualLanguageBulkCsvModalProps> =
                     </div>
                   ) : (
                     <textarea
-                      rows={6}
+                      rows={8}
                       value={englishText}
                       onChange={(e) => {
                         setEnglishText(e.target.value);
                         setEnglishFileName('Pasted_English.csv');
                       }}
-                      placeholder="Paste English CSV lines here... (Question | Opt A | Opt B | Opt C | Opt D | Key | Explanation)"
-                      className="w-full font-mono text-[11px] p-2.5 border border-slate-300 rounded-xl bg-white focus:ring-2 focus:ring-indigo-500 outline-none"
+                      placeholder={`Paste English questions here (CSV or Multi-line MCQ format):\n\nFormat 1 (Pipe/CSV): Question | Opt A | Opt B | Opt C | Opt D | Key | Explanation\n\nFormat 2 (Paragraph MCQs):\n1. Question text here...\n(A) Option A\n(B) Option B\n(C) Option C\n(D) Option D\nAnswer: B`}
+                      className="w-full font-mono text-[11px] leading-relaxed whitespace-pre-wrap p-2.5 border border-slate-300 rounded-xl bg-white focus:ring-2 focus:ring-indigo-500 outline-none"
                     />
                   )}
 
@@ -488,14 +509,14 @@ export const DualLanguageBulkCsvModal: React.FC<DualLanguageBulkCsvModalProps> =
                     </div>
                   ) : (
                     <textarea
-                      rows={6}
+                      rows={8}
                       value={hindiText}
                       onChange={(e) => {
                         setHindiText(e.target.value);
                         setHindiFileName('Pasted_Hindi.csv');
                       }}
-                      placeholder="यहाँ हिन्दी CSV पंक्तियाँ पेस्ट करें... (प्रश्न | विकल्प A | विकल्प B | विकल्प C | विकल्प D | उत्तर | व्याख्या)"
-                      className="w-full font-mono text-[11px] p-2.5 border border-slate-300 rounded-xl bg-white focus:ring-2 focus:ring-rose-500 outline-none"
+                      placeholder={`यहाँ हिन्दी प्रश्न पेस्ट करें (CSV या बहु-पंक्ति MCQ प्रारूप):\n\nप्रारूप 1: प्रश्न | विकल्प A | विकल्प B | विकल्प C | विकल्प D | उत्तर | व्याख्या\n\nप्रारूप 2:\n1. प्रश्न यहाँ लिखें...\n(A) विकल्प A\n(B) विकल्प B\n(C) विकल्प C\n(D) विकल्प D\nउत्तर: B`}
+                      className="w-full font-mono text-[11px] leading-relaxed whitespace-pre-wrap p-2.5 border border-slate-300 rounded-xl bg-white focus:ring-2 focus:ring-rose-500 outline-none"
                     />
                   )}
 
@@ -644,15 +665,19 @@ export const DualLanguageBulkCsvModal: React.FC<DualLanguageBulkCsvModalProps> =
                               )}
                             </div>
 
-                            {/* Question Texts */}
-                            <p className="text-xs font-semibold text-slate-900 pt-1">
-                              {q.questionText}
-                            </p>
-                            {q.questionTextHindi && (
-                              <p className="text-xs text-slate-700 font-medium font-sans">
-                                {q.questionTextHindi}
-                              </p>
-                            )}
+                            {/* Question Texts with preserved paragraph and line breaks */}
+                            <div className="pt-1 space-y-1.5">
+                              <FormattedQuestionText
+                                text={q.questionText}
+                                className="text-xs font-semibold text-slate-900 leading-relaxed"
+                              />
+                              {q.questionTextHindi && (
+                                <FormattedQuestionText
+                                  text={q.questionTextHindi}
+                                  className="text-xs text-slate-700 font-medium font-sans leading-relaxed"
+                                />
+                              )}
+                            </div>
                           </div>
 
                           <div className="shrink-0 text-slate-400 p-1">
@@ -687,13 +712,21 @@ export const DualLanguageBulkCsvModal: React.FC<DualLanguageBulkCsvModalProps> =
                                     </div>
                                     <div className="text-xs">
                                       {q.options[optKey] && q.optionsHindi?.[optKey] && q.options[optKey].trim() !== q.optionsHindi[optKey].trim() ? (
-                                        <div className="inline-flex items-center gap-1.5 flex-wrap">
-                                          <span className="font-semibold text-slate-900">{q.options[optKey]}</span>
-                                          <span className="text-slate-400 font-bold">/</span>
-                                          <span className="text-slate-700">{q.optionsHindi[optKey]}</span>
+                                        <div className="space-y-0.5">
+                                          <FormattedQuestionText
+                                            text={q.options[optKey]}
+                                            className="font-semibold text-slate-900"
+                                          />
+                                          <FormattedQuestionText
+                                            text={q.optionsHindi[optKey]}
+                                            className="text-slate-700"
+                                          />
                                         </div>
                                       ) : (
-                                        <span className="font-medium text-slate-800">{q.options[optKey] || q.optionsHindi?.[optKey] || ''}</span>
+                                        <FormattedQuestionText
+                                          text={q.options[optKey] || q.optionsHindi?.[optKey] || ''}
+                                          className="font-medium text-slate-800"
+                                        />
                                       )}
                                     </div>
                                   </div>
@@ -702,10 +735,17 @@ export const DualLanguageBulkCsvModal: React.FC<DualLanguageBulkCsvModalProps> =
                             </div>
 
                             {(q.explanation || q.explanationHindi) && (
-                              <div className="p-2.5 bg-indigo-50/50 rounded-lg border border-indigo-100 text-[11px] text-slate-700 space-y-0.5">
+                              <div className="p-2.5 bg-indigo-50/50 rounded-lg border border-indigo-100 text-[11px] text-slate-700 space-y-1">
                                 <span className="font-bold text-indigo-900 block">Explanation:</span>
-                                {q.explanation && <p>{q.explanation}</p>}
-                                {q.explanationHindi && <p className="text-slate-600">{q.explanationHindi}</p>}
+                                {q.explanation && (
+                                  <FormattedQuestionText text={q.explanation} className="leading-relaxed" />
+                                )}
+                                {q.explanationHindi && (
+                                  <FormattedQuestionText
+                                    text={q.explanationHindi}
+                                    className="text-slate-600 leading-relaxed"
+                                  />
+                                )}
                               </div>
                             )}
 

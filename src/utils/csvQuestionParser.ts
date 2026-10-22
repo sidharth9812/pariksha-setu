@@ -1,4 +1,5 @@
 import { QuestionItem } from '../types/exam';
+import { preserveQuestionFormatting } from './questionTextFormatter';
 
 export interface ParsedLanguageRow {
   rowNumber: number;
@@ -58,11 +59,50 @@ export interface AutoSettleResult {
 }
 
 /**
+ * Splits raw CSV text into logical records while respecting double-quoted
+ * multi-line fields (RFC 4180) so paragraph breaks and line breaks inside
+ * quoted cells are never broken across separate rows.
+ */
+export function splitCsvRecords(rawText: string): string[] {
+  const normalized = rawText.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  const records: string[] = [];
+  let current = '';
+  let inQuotes = false;
+
+  for (let i = 0; i < normalized.length; i++) {
+    const char = normalized[i];
+    const nextChar = normalized[i + 1];
+
+    if (char === '"') {
+      current += char;
+      if (inQuotes && nextChar === '"') {
+        current += nextChar;
+        i++;
+      } else {
+        inQuotes = !inQuotes;
+      }
+    } else if (char === '\n' && !inQuotes) {
+      records.push(current);
+      current = '';
+    } else {
+      current += char;
+    }
+  }
+
+  if (current.length > 0) {
+    records.push(current);
+  }
+
+  return records;
+}
+
+/**
  * Robust CSV Line Splitter supporting:
  * - Pipe delimiter (|)
- * - Comma delimiter (,) with quoted strings ("a, b", "c")
+ * - Comma delimiter (,) with quoted multi-line strings ("a\nb", "c")
  * - Tab delimiter (\t)
  * - Semicolon delimiter (;)
+ * Preserves internal line breaks (\n) and paragraph breaks (\n\n) within each cell.
  */
 export function splitCsvLine(line: string): string[] {
   const trimmed = line.trim();
@@ -70,15 +110,15 @@ export function splitCsvLine(line: string): string[] {
 
   // 1. If pipe separated, prioritize pipe (|) delimiter
   if (trimmed.includes('|')) {
-    return trimmed.split('|').map((p) => p.trim());
+    return trimmed.split('|').map((p) => preserveQuestionFormatting(p));
   }
 
   // 2. If tab separated, prioritize tab (\t) delimiter
   if (trimmed.includes('\t')) {
-    return trimmed.split('\t').map((p) => p.trim());
+    return trimmed.split('\t').map((p) => preserveQuestionFormatting(p));
   }
 
-  // 3. Comma or semicolon CSV parser with quote escaping
+  // 3. Comma or semicolon CSV parser with quote escaping and multi-line support
   const delimiter = trimmed.includes(';') && !trimmed.includes(',') ? ';' : ',';
   const result: string[] = [];
   let current = '';
@@ -96,36 +136,93 @@ export function splitCsvLine(line: string): string[] {
         inQuotes = !inQuotes;
       }
     } else if (char === delimiter && !inQuotes) {
-      result.push(current.trim());
+      result.push(preserveQuestionFormatting(current));
       current = '';
     } else {
       current += char;
     }
   }
 
-  result.push(current.trim());
+  result.push(preserveQuestionFormatting(current));
   return result;
 }
 
 /**
  * Normalizes answer key from various formats:
- * 'A', 'B', 'C', 'D', '1', '2', '3', '4', 'क', 'ख', 'ग', 'घ', 'optA', etc.
+ * 'A', 'B', 'C', 'D', '(A)', '[B]', '1', '2', '3', '4', 'क', 'ख', 'ग', 'घ', 'अ', 'ब', 'स', 'द', 'Option A', etc.
  */
 export function normalizeAnswerKey(raw?: string): 'A' | 'B' | 'C' | 'D' | null {
   if (!raw) return null;
-  const clean = raw.trim().toUpperCase();
+  const clean = raw
+    .trim()
+    .replace(/^[\(\[\{]+|[\)\]\}\.:-]+$/g, '')
+    .trim()
+    .toUpperCase();
 
-  if (clean === 'A' || clean === '1' || clean === 'OPTION A' || clean === 'OPT A' || clean === 'क') return 'A';
-  if (clean === 'B' || clean === '2' || clean === 'OPTION B' || clean === 'OPT B' || clean === 'ख') return 'B';
-  if (clean === 'C' || clean === '3' || clean === 'OPTION C' || clean === 'OPT C' || clean === 'ग') return 'C';
-  if (clean === 'D' || clean === '4' || clean === 'OPTION D' || clean === 'OPT D' || clean === 'घ') return 'D';
+  if (
+    clean === 'A' ||
+    clean === '1' ||
+    clean === 'OPTION A' ||
+    clean === 'OPT A' ||
+    clean === 'OPTION (A)' ||
+    clean === 'विकल्प A' ||
+    clean === 'क' ||
+    clean === 'अ'
+  )
+    return 'A';
+  if (
+    clean === 'B' ||
+    clean === '2' ||
+    clean === 'OPTION B' ||
+    clean === 'OPT B' ||
+    clean === 'OPTION (B)' ||
+    clean === 'विकल्प B' ||
+    clean === 'ख' ||
+    clean === 'ब'
+  )
+    return 'B';
+  if (
+    clean === 'C' ||
+    clean === '3' ||
+    clean === 'OPTION C' ||
+    clean === 'OPT C' ||
+    clean === 'OPTION (C)' ||
+    clean === 'विकल्प C' ||
+    clean === 'ग' ||
+    clean === 'स'
+  )
+    return 'C';
+  if (
+    clean === 'D' ||
+    clean === '4' ||
+    clean === 'OPTION D' ||
+    clean === 'OPT D' ||
+    clean === 'OPTION (D)' ||
+    clean === 'विकल्प D' ||
+    clean === 'घ' ||
+    clean === 'द'
+  )
+    return 'D';
 
-  // Check if first character is A/B/C/D
-  const firstChar = clean[0];
-  if (['A', 'B', 'C', 'D'].includes(firstChar)) {
-    return firstChar as 'A' | 'B' | 'C' | 'D';
+  // Match leading option token like "(B) Bhopal" or "B) Bhopal" or "क) इंदौर"
+  const tokenMatch = raw
+    .trim()
+    .match(/^(?:option|opt|विकल्प)?\s*[\(\[\{]?\s*([A-Da-d1-4कखगघअबसद])\s*[\)\]\}\.:\s-]/i);
+  if (tokenMatch) {
+    return mapSingleOptionToken(tokenMatch[1]);
   }
 
+  const firstChar = clean[0];
+  return mapSingleOptionToken(firstChar);
+}
+
+function mapSingleOptionToken(token?: string): 'A' | 'B' | 'C' | 'D' | null {
+  if (!token) return null;
+  const t = token.trim().toUpperCase();
+  if (t === 'A' || t === '1' || t === 'क' || t === 'अ') return 'A';
+  if (t === 'B' || t === '2' || t === 'ख' || t === 'ब') return 'B';
+  if (t === 'C' || t === '3' || t === 'ग' || t === 'स') return 'C';
+  if (t === 'D' || t === '4' || t === 'घ' || t === 'द') return 'D';
   return null;
 }
 
@@ -137,12 +234,11 @@ export function isHeaderRow(cells: string[]): boolean {
   const first = (cells[0] || '').trim().toLowerCase();
   const joined = cells.join(' ').toLowerCase();
 
-  // If first cell contains a question mark or sentence end, it's definitely a question, not a header
-  if (first.includes('?') || first.includes('।') || first.length > 50) {
+  // If first cell contains a question mark, newline, or sentence end, it's a question, not a header
+  if (first.includes('?') || first.includes('।') || first.includes('\n') || first.length > 50) {
     return false;
   }
 
-  // Exact header labels for the first column
   const exactFirstHeaderLabels = [
     'question',
     'questions',
@@ -166,7 +262,6 @@ export function isHeaderRow(cells: string[]): boolean {
     return true;
   }
 
-  // Count header keywords across all cells
   let matches = 0;
   if (joined.includes('option') || joined.includes('विकल्प')) matches++;
   if (joined.includes('answer') || joined.includes('उत्तर') || joined.includes('correct')) matches++;
@@ -177,47 +272,379 @@ export function isHeaderRow(cells: string[]): boolean {
 }
 
 /**
- * Parses raw CSV text for one language (English or Hindi)
+ * Strips leading question numbering like "Q1.", "Q. 12:", "1.", "(1)", "प्रश्न 1."
+ * from the first line of a question while keeping the rest of the multi-line text intact.
+ */
+function stripLeadingQuestionNumber(text: string): string {
+  const cleaned = preserveQuestionFormatting(text);
+  return cleaned.replace(
+    /^(?:(?:Q(?:uestion)?|प्र(?:श्न)?|सवाल)\s*[\.\-:]?\s*\d+\s*[\.\)\-:]|\(\d+\)|\d+\s*[\.\)\-:])\s+/i,
+    ''
+  );
+}
+
+/**
+ * Extracts inline options if a line contains multiple options on the same line,
+ * e.g. "(A) Indore  (B) Bhopal  (C) Jabalpur  (D) Gwalior"
+ * or "Question stem? (A) Opt1 (B) Opt2 (C) Opt3 (D) Opt4"
+ */
+function extractOptionsFromLine(line: string): {
+  stemPrefix?: string;
+  extractedOptions: Partial<Record<'A' | 'B' | 'C' | 'D', string>>;
+  detectedAnswer?: 'A' | 'B' | 'C' | 'D';
+} | null {
+  const trimmed = line.trim();
+  if (!trimmed) return null;
+
+  // Match option markers like (A), [A], A), A., (क), क), (अ), Option A:
+  const optionRegex =
+    /(?:^|\s+)(?:(?:Option|Opt|विकल्प)\s*)?(?:\(([A-Da-dकखगघअबसद])\)|\[([A-Da-dकखगघअबसद])\]|([A-Da-dकखगघअबसद])[\)\.]|(?:Option|Opt|विकल्प)\s+([A-Da-d1-4कखगघअबसद])\s*[:\.\)\-])\s+/gi;
+
+  const matches: { key: 'A' | 'B' | 'C' | 'D'; startIndex: number; contentStart: number }[] = [];
+  let match: RegExpExecArray | null;
+
+  while ((match = optionRegex.exec(trimmed)) !== null) {
+    const rawToken = match[1] || match[2] || match[3] || match[4];
+    const mapped = mapSingleOptionToken(rawToken);
+    if (!mapped) continue;
+
+    // Calculate where the marker itself begins (skipping leading whitespace)
+    const fullMatch = match[0];
+    const leadingSpaces = fullMatch.length - fullMatch.trimStart().length;
+    const markerStart = match.index + leadingSpaces;
+    const contentStart = match.index + fullMatch.length;
+
+    matches.push({
+      key: mapped,
+      startIndex: markerStart,
+      contentStart,
+    });
+  }
+
+  if (matches.length === 0) return null;
+
+  // If the marker does not start at index 0, only treat as inline options if we have at least 2 sequential options (e.g. A and B)
+  if (matches[0].startIndex > 0 && matches.length < 2) {
+    return null;
+  }
+
+  // Verify sequential order (e.g. starts with A or continues B, C, D)
+  const stemPrefix = matches[0].startIndex > 0 ? trimmed.slice(0, matches[0].startIndex).trim() : undefined;
+  const extractedOptions: Partial<Record<'A' | 'B' | 'C' | 'D', string>> = {};
+  let detectedAnswer: 'A' | 'B' | 'C' | 'D' | undefined;
+
+  for (let i = 0; i < matches.length; i++) {
+    const current = matches[i];
+    const next = matches[i + 1];
+    let val = trimmed.slice(current.contentStart, next ? next.startIndex : trimmed.length).trim();
+
+    // Check if trailing Answer: X is attached at the end of the last option
+    if (!next) {
+      const trailingAnsMatch = val.match(
+        /\s+(?:Answer|Ans|Correct\s*Answer|उत्तर|सही\s*उत्तर)\s*[:\-–=]\s*([\(\[]?[A-Da-d1-4कखगघअबसद][\)\]]?)\s*$/i
+      );
+      if (trailingAnsMatch) {
+        const parsedAns = normalizeAnswerKey(trailingAnsMatch[1]);
+        if (parsedAns) detectedAnswer = parsedAns;
+        val = val.slice(0, trailingAnsMatch.index).trim();
+      }
+    }
+
+    // Check if option is marked with * or ✓ as correct answer
+    if (val.endsWith('*') || val.endsWith('✓') || val.endsWith('✔') || /\((?:correct|ans|सही)\)$/i.test(val)) {
+      detectedAnswer = current.key;
+      val = val
+        .replace(/(?:\*|✓|✔|\((?:correct|ans|सही)\))+$/i, '')
+        .trim();
+    }
+
+    extractedOptions[current.key] = val;
+  }
+
+  return {
+    stemPrefix,
+    extractedOptions,
+    detectedAnswer,
+  };
+}
+
+/**
+ * Parses multi-line / paragraph-formatted MCQ blocks (copied from Word, PDF, Docs, or text files)
+ * while preserving all paragraph breaks (\n\n) and line breaks (\n) inside question stems,
+ * options, and explanations.
+ */
+export function parseBlockFormattedQuestions(rawText: string): ParsedLanguageRow[] {
+  if (!rawText || !rawText.trim()) return [];
+
+  const normalized = rawText
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+    .replace(/\\n/g, '\n')
+    .replace(/<br\s*\/?>/gi, '\n');
+
+  const lines = normalized.split('\n');
+  const results: ParsedLanguageRow[] = [];
+
+  let questionLines: string[] = [];
+  let options: Partial<Record<'A' | 'B' | 'C' | 'D', string>> = {};
+  let lastOptionKey: 'A' | 'B' | 'C' | 'D' | null = null;
+  let correctAnswer: 'A' | 'B' | 'C' | 'D' | undefined = undefined;
+  let explanationLines: string[] = [];
+  let inExplanation = false;
+  let subject: string | undefined = undefined;
+  let sawBlankLineAfterOptions = false;
+
+  const hasAllFourOptions = () =>
+    Boolean(options.A !== undefined && options.B !== undefined && options.C !== undefined && options.D !== undefined);
+
+  const flushCurrentQuestion = () => {
+    const qTextRaw = stripLeadingQuestionNumber(questionLines.join('\n'));
+    const hasAnyOption = Boolean(options.A || options.B || options.C || options.D);
+    if (!qTextRaw && !hasAnyOption) {
+      return;
+    }
+
+    const rowNum = results.length + 1;
+    const errors: string[] = [];
+    const optA = preserveQuestionFormatting(options.A || '');
+    const optB = preserveQuestionFormatting(options.B || '');
+    const optC = preserveQuestionFormatting(options.C || '');
+    const optD = preserveQuestionFormatting(options.D || '');
+
+    if (!qTextRaw) {
+      errors.push(`Question ${rowNum}: Question text is empty.`);
+    }
+    if (!optA || !optB || !optC || !optD) {
+      errors.push(`Question ${rowNum}: All 4 options (A, B, C, D) are required.`);
+    }
+
+    results.push({
+      rowNumber: rowNum,
+      questionText: qTextRaw,
+      optionA: optA,
+      optionB: optB,
+      optionC: optC,
+      optionD: optD,
+      correctAnswer,
+      explanation: preserveQuestionFormatting(explanationLines.join('\n')) || undefined,
+      subject: subject ? preserveQuestionFormatting(subject) : undefined,
+      errors,
+    });
+
+    questionLines = [];
+    options = {};
+    lastOptionKey = null;
+    correctAnswer = undefined;
+    explanationLines = [];
+    inExplanation = false;
+    subject = undefined;
+    sawBlankLineAfterOptions = false;
+  };
+
+  const questionStartPattern =
+    /^(?:(?:Q(?:uestion)?|प्र(?:श्न)?|सवाल)\s*[\.\-:]?\s*\d+\s*[\.\)\-:]|\(\d+\)|\d+\s*[\.\)\-:])\s+\S/i;
+  const answerLinePattern =
+    /^(?:Answer|Ans|Correct\s*Answer|Correct\s*Option|Key|उत्तर|सही\s*उत्तर|सही\s*विकल्प)\s*[:\-–=\.]\s*(.+)$/i;
+  const explanationLinePattern =
+    /^(?:Explanation|Solution|Sol|Hint|Note|व्याख्या|हल|स्पष्टीकरण)\s*[:\-–=\.]\s*(.*)$/i;
+  const subjectLinePattern = /^(?:Subject|Topic|Category|विषय)\s*[:\-–=\.]\s*(.+)$/i;
+
+  for (let i = 0; i < lines.length; i++) {
+    const rawLine = lines[i];
+    const trimmed = rawLine.trim();
+
+    // Ignore pure comment lines
+    if (trimmed.startsWith('#') || trimmed.startsWith('//')) {
+      continue;
+    }
+
+    // Handle blank lines (paragraph breaks)
+    if (!trimmed) {
+      if (hasAllFourOptions()) {
+        sawBlankLineAfterOptions = true;
+        if (inExplanation && explanationLines.length > 0 && explanationLines[explanationLines.length - 1] !== '') {
+          explanationLines.push('');
+        }
+      } else if (lastOptionKey) {
+        // Blank line between options — ignore
+      } else if (questionLines.length > 0 && questionLines[questionLines.length - 1] !== '') {
+        // Blank line inside multi-paragraph question stem! Preserve paragraph break!
+        questionLines.push('');
+      }
+      continue;
+    }
+
+    // 1. Check if this line is an Answer key line
+    const ansMatch = trimmed.match(answerLinePattern);
+    if (ansMatch && (lastOptionKey !== null || hasAllFourOptions())) {
+      const parsedKey = normalizeAnswerKey(ansMatch[1]);
+      if (parsedKey) {
+        correctAnswer = parsedKey;
+      }
+      inExplanation = false;
+      continue;
+    }
+
+    // 2. Check if this line is an Explanation start line
+    const expMatch = trimmed.match(explanationLinePattern);
+    if (expMatch && (lastOptionKey !== null || hasAllFourOptions())) {
+      inExplanation = true;
+      if (expMatch[1]?.trim()) {
+        explanationLines.push(expMatch[1].trim());
+      }
+      continue;
+    }
+
+    // 3. Check if this line is a Subject line
+    const subjMatch = trimmed.match(subjectLinePattern);
+    if (subjMatch && (lastOptionKey !== null || hasAllFourOptions())) {
+      subject = subjMatch[1].trim();
+      continue;
+    }
+
+    // 4. If we already have all 4 options (A, B, C, D), check if a NEW question is starting
+    if (hasAllFourOptions()) {
+      const isExplicitNewQuestion = questionStartPattern.test(trimmed);
+      const nextLineOptionCheck = extractOptionsFromLine(trimmed);
+      const isNewQuestionAfterBlank =
+        sawBlankLineAfterOptions && !inExplanation && !nextLineOptionCheck;
+      const isNewQuestionAfterAnswer =
+        correctAnswer !== undefined && !inExplanation && !nextLineOptionCheck;
+
+      if (isExplicitNewQuestion || isNewQuestionAfterBlank || isNewQuestionAfterAnswer) {
+        flushCurrentQuestion();
+      } else if (inExplanation) {
+        explanationLines.push(rawLine.replace(/[ \t]+$/g, ''));
+        continue;
+      }
+    }
+
+    // 5. Check if the line contains Option(s) A, B, C, D
+    const optionExtraction = extractOptionsFromLine(rawLine);
+    if (optionExtraction) {
+      const { stemPrefix, extractedOptions, detectedAnswer } = optionExtraction;
+      const extractedKeys = Object.keys(extractedOptions) as ('A' | 'B' | 'C' | 'D')[];
+
+      // Determine if these options logically fit the current question
+      const firstKey = extractedKeys[0];
+      const isStartingOptionsWithA = firstKey === 'A' && options.A === undefined && questionLines.length > 0;
+      const isContinuingOptions =
+        (firstKey === 'B' && options.A !== undefined && options.B === undefined) ||
+        (firstKey === 'C' && options.B !== undefined && options.C === undefined) ||
+        (firstKey === 'D' && options.C !== undefined && options.D === undefined);
+
+      if (isStartingOptionsWithA || isContinuingOptions) {
+        if (stemPrefix) {
+          questionLines.push(stemPrefix);
+        }
+        for (const k of extractedKeys) {
+          options[k] = extractedOptions[k];
+          lastOptionKey = k;
+        }
+        if (detectedAnswer && !correctAnswer) {
+          correctAnswer = detectedAnswer;
+        }
+        continue;
+      }
+    }
+
+    // 6. If we are currently inside an option (e.g. multi-line option text before the next option)
+    if (lastOptionKey && !hasAllFourOptions() && !inExplanation) {
+      options[lastOptionKey] = `${options[lastOptionKey]}\n${trimmed}`;
+      continue;
+    }
+
+    // 7. Otherwise, this line is part of the current question's multi-line / multi-paragraph stem!
+    questionLines.push(rawLine.replace(/[ \t]+$/g, ''));
+  }
+
+  flushCurrentQuestion();
+  return results;
+}
+
+/**
+ * Parses raw CSV or Multi-line Block text for one language (English or Hindi)
  */
 export function parseLanguageCsv(rawText: string, language: 'en' | 'hi'): ParsedLanguageRow[] {
   if (!rawText || !rawText.trim()) return [];
 
-  // Normalize newlines
-  const rawLines = rawText.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
-  const lines = rawLines.map((l) => l.trim()).filter((l) => l.length > 0 && !l.startsWith('#') && !l.startsWith('//'));
+  // 1. Split into quote-aware records so multi-line quoted CSV cells keep their paragraph breaks
+  const rawRecords = splitCsvRecords(rawText);
+  const nonEmptyRecords = rawRecords.filter((r) => {
+    const t = r.trim();
+    return t.length > 0 && !t.startsWith('#') && !t.startsWith('//');
+  });
 
-  if (lines.length === 0) return [];
+  if (nonEmptyRecords.length === 0) return [];
 
-  const startIndex = isHeaderRow(splitCsvLine(lines[0])) ? 1 : 0;
-  const parsedRows: ParsedLanguageRow[] = [];
+  // Check if input uses pipe (|) or tab (\t) delimiters where multi-line question paragraphs precede the delimited line
+  const hasPipeRows = nonEmptyRecords.some((r) => r.split('|').length >= 5);
+  const hasTabRows = !hasPipeRows && nonEmptyRecords.some((r) => r.split('\t').length >= 5);
 
-  for (let i = startIndex; i < lines.length; i++) {
-    const rowNum = i + 1;
-    const parts = splitCsvLine(lines[i]);
+  let consolidatedRecords: string[] = [];
 
-    // Format expected:
-    // Col 0: Question Text
-    // Col 1: Option A
-    // Col 2: Option B
-    // Col 3: Option C
-    // Col 4: Option D
-    // Col 5: Correct Answer (Optional/Recommended for Hindi, required for standalone)
-    // Col 6: Explanation (Optional)
-    // Col 7: Subject (Optional)
+  if (hasPipeRows || hasTabRows) {
+    const delim = hasPipeRows ? '|' : '\t';
+    let pendingParagraphLines: string[] = [];
+
+    for (const rawLine of rawText.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n')) {
+      const trimmed = rawLine.trim();
+      if (trimmed.startsWith('#') || trimmed.startsWith('//')) continue;
+
+      if (rawLine.includes(delim)) {
+        const cells = rawLine.split(delim);
+        // Check if this is a header row
+        if (consolidatedRecords.length === 0 && pendingParagraphLines.length === 0 && isHeaderRow(cells)) {
+          consolidatedRecords.push(rawLine);
+          continue;
+        }
+        if (pendingParagraphLines.length > 0) {
+          const prefix = pendingParagraphLines.join('\n').trim();
+          cells[0] = prefix ? `${prefix}\n${cells[0].trimStart()}` : cells[0];
+          pendingParagraphLines = [];
+        }
+        consolidatedRecords.push(cells.join(delim));
+      } else {
+        // Line without pipe/tab: part of a multi-line / multi-paragraph question stem!
+        if (trimmed.length > 0 || pendingParagraphLines.length > 0) {
+          pendingParagraphLines.push(rawLine.replace(/[ \t]+$/g, ''));
+        }
+      }
+    }
+
+    // If trailing lines remained without delimiters
+    if (pendingParagraphLines.length > 0 && consolidatedRecords.length === 0) {
+      consolidatedRecords = nonEmptyRecords;
+    }
+  } else {
+    consolidatedRecords = nonEmptyRecords;
+  }
+
+  // Try parsing as structured CSV rows first
+  const startIndex =
+    consolidatedRecords.length > 0 && isHeaderRow(splitCsvLine(consolidatedRecords[0])) ? 1 : 0;
+  const csvParsedRows: ParsedLanguageRow[] = [];
+
+  for (let i = startIndex; i < consolidatedRecords.length; i++) {
+    const rowNum = csvParsedRows.length + 1;
+    const parts = splitCsvLine(consolidatedRecords[i]);
+
     const errors: string[] = [];
 
     if (parts.length < 5) {
-      errors.push(`Row ${rowNum}: Insufficient columns. Minimum 5 columns required (Question, Option A, Option B, Option C, Option D).`);
+      errors.push(
+        `Row ${rowNum}: Insufficient columns. Minimum 5 columns required (Question, Option A, Option B, Option C, Option D).`
+      );
     }
 
-    const qText = parts[0] || '';
-    const optA = parts[1] || '';
-    const optB = parts[2] || '';
-    const optC = parts[3] || '';
-    const optD = parts[4] || '';
-    const rawKey = parts[5] || '';
-    const explanation = parts[6] || '';
-    const subject = parts[7] || '';
+    const qText = preserveQuestionFormatting(parts[0] || '');
+    const optA = preserveQuestionFormatting(parts[1] || '');
+    const optB = preserveQuestionFormatting(parts[2] || '');
+    const optC = preserveQuestionFormatting(parts[3] || '');
+    const optD = preserveQuestionFormatting(parts[4] || '');
+    const rawKey = (parts[5] || '').trim();
+    const explanation = preserveQuestionFormatting(parts[6] || '');
+    const subject = preserveQuestionFormatting(parts[7] || '');
 
     if (!qText) {
       errors.push(`Row ${rowNum}: Question text is empty.`);
@@ -236,7 +663,7 @@ export function parseLanguageCsv(rawText: string, language: 'en' | 'hi'): Parsed
       }
     }
 
-    parsedRows.push({
+    csvParsedRows.push({
       rowNumber: rowNum,
       questionText: qText,
       optionA: optA,
@@ -250,12 +677,23 @@ export function parseLanguageCsv(rawText: string, language: 'en' | 'hi'): Parsed
     });
   }
 
-  return parsedRows;
+  // Check if the input was actually pasted/uploaded in Multi-Line MCQ Block format
+  // (e.g., Q1... (A)... (B)... (C)... (D)... Answer: B) rather than CSV columns
+  const validCsvRowCount = csvParsedRows.filter((r) => r.errors.length === 0).length;
+  if (validCsvRowCount === 0 && !hasPipeRows && !hasTabRows) {
+    const blockParsed = parseBlockFormattedQuestions(rawText);
+    const validBlockCount = blockParsed.filter((r) => r.optionA && r.optionB && r.optionC && r.optionD).length;
+    if (validBlockCount > 0) {
+      return blockParsed;
+    }
+  }
+
+  return csvParsedRows;
 }
 
 /**
  * AUTOMATIC SETTLEMENT ENGINE
- * Takes separate English and Hindi CSV texts, parses both,
+ * Takes separate English and Hindi CSV/block texts, parses both,
  * aligns and merges them row-by-row into unified bilingual questions,
  * and calculates health percentages for progress display.
  */
@@ -303,7 +741,9 @@ export function autoSettleDualLanguageCsv(
     let finalKey: 'A' | 'B' | 'C' | 'D' = enKey || hiKey || 'A';
 
     if (enKey && hiKey && enKey !== hiKey) {
-      qWarnings.push(`Question #${qNum}: Correct answer mismatch between English (${enKey}) and Hindi (${hiKey}). Using English answer '${enKey}'.`);
+      qWarnings.push(
+        `Question #${qNum}: Correct answer mismatch between English (${enKey}) and Hindi (${hiKey}). Using English answer '${enKey}'.`
+      );
       finalKey = enKey;
     } else if (!enKey && !hiKey) {
       qErrors.push(`Question #${qNum}: Correct answer key (A, B, C, D) is missing.`);
@@ -320,13 +760,15 @@ export function autoSettleDualLanguageCsv(
       status = 'english_only';
       englishOnlyCount++;
       if (hindiCount > 0) {
-        qWarnings.push(`Question #${qNum}: Hindi translation missing (Hindi CSV has only ${hindiCount} rows).`);
+        qWarnings.push(`Question #${qNum}: Hindi translation missing (Hindi input has only ${hindiCount} questions).`);
       }
     } else if (hasHindi) {
       status = 'hindi_only';
       hindiOnlyCount++;
       if (englishCount > 0) {
-        qWarnings.push(`Question #${qNum}: English translation missing (English CSV has only ${englishCount} rows).`);
+        qWarnings.push(
+          `Question #${qNum}: English translation missing (English input has only ${englishCount} questions).`
+        );
       }
     }
 
@@ -342,28 +784,32 @@ export function autoSettleDualLanguageCsv(
       allWarnings.push(...qWarnings);
     }
 
-    // Prepare settled question data
-    const questionText = en?.questionText || hi?.questionText || '';
-    const questionTextHindi = hi?.questionText || (hasHindi ? hi?.questionText : undefined);
+    // Prepare settled question data with preserved paragraph and line breaks
+    const questionText = preserveQuestionFormatting(en?.questionText || hi?.questionText || '');
+    const questionTextHindi = hi?.questionText
+      ? preserveQuestionFormatting(hi.questionText)
+      : hasHindi
+      ? preserveQuestionFormatting(hi?.questionText)
+      : undefined;
 
     const options = {
-      A: en?.optionA || hi?.optionA || '',
-      B: en?.optionB || hi?.optionB || '',
-      C: en?.optionC || hi?.optionC || '',
-      D: en?.optionD || hi?.optionD || '',
+      A: preserveQuestionFormatting(en?.optionA || hi?.optionA || ''),
+      B: preserveQuestionFormatting(en?.optionB || hi?.optionB || ''),
+      C: preserveQuestionFormatting(en?.optionC || hi?.optionC || ''),
+      D: preserveQuestionFormatting(en?.optionD || hi?.optionD || ''),
     };
 
     const optionsHindi = hasHindi
       ? {
-          A: hi?.optionA || '',
-          B: hi?.optionB || '',
-          C: hi?.optionC || '',
-          D: hi?.optionD || '',
+          A: preserveQuestionFormatting(hi?.optionA || ''),
+          B: preserveQuestionFormatting(hi?.optionB || ''),
+          C: preserveQuestionFormatting(hi?.optionC || ''),
+          D: preserveQuestionFormatting(hi?.optionD || ''),
         }
       : undefined;
 
-    const explanation = en?.explanation || undefined;
-    const explanationHindi = hi?.explanation || undefined;
+    const explanation = en?.explanation ? preserveQuestionFormatting(en.explanation) : undefined;
+    const explanationHindi = hi?.explanation ? preserveQuestionFormatting(hi.explanation) : undefined;
     const subject = en?.subject || hi?.subject || undefined;
 
     settledQuestions.push({
@@ -391,7 +837,7 @@ export function autoSettleDualLanguageCsv(
     if (errorCount === 0) {
       overallHealthPercent = 100;
     } else {
-      overallHealthPercent = Math.max(0, Math.round(((validCount) / maxRows) * 100));
+      overallHealthPercent = Math.max(0, Math.round((validCount / maxRows) * 100));
     }
   }
 
@@ -436,8 +882,8 @@ export const SAMPLE_HINDI_CSV = `प्रश्न | विकल्प A | व
  * If only one language is present or both are identical, returns that language.
  */
 export function formatBilingualOption(englishOpt?: string, hindiOpt?: string): string {
-  const en = (englishOpt || '').trim();
-  const hi = (hindiOpt || '').trim();
+  const en = preserveQuestionFormatting(englishOpt);
+  const hi = preserveQuestionFormatting(hindiOpt);
   if (en && hi && en !== hi) {
     return `${en} / ${hi}`;
   }

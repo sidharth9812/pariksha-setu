@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { X, CheckCircle2, AlertCircle, Clock, Award, Shield, Eye } from 'lucide-react';
 import { TestItem, QuestionItem } from '../../types/exam';
 import { getQuestionsForTest } from '../../services/examService';
+import { FormattedQuestionText } from '../../utils/questionTextFormatter';
 
 interface TestPreviewModalProps {
   test: TestItem;
@@ -73,13 +74,15 @@ export const TestPreviewModal: React.FC<TestPreviewModalProps> = ({ test, onClos
           ) : currentQ ? (
             <div className="space-y-4">
               {currentQ.questionTextHindi && (
-                <div className="text-base sm:text-lg font-bold text-slate-900 leading-snug">
-                  {currentQ.questionTextHindi}
-                </div>
+                <FormattedQuestionText
+                  text={currentQ.questionTextHindi}
+                  className="text-base sm:text-lg font-bold text-slate-900 leading-relaxed"
+                />
               )}
-              <div className="text-sm sm:text-base text-slate-700 leading-snug">
-                {currentQ.questionText}
-              </div>
+              <FormattedQuestionText
+                text={currentQ.questionText}
+                className="text-sm sm:text-base text-slate-700 leading-relaxed"
+              />
 
               {(currentQ.questionImageUrl || currentQ.imageUrl) && (
                 <div className="pt-2 max-w-sm rounded-xl overflow-hidden border border-slate-200 bg-white">
@@ -117,13 +120,19 @@ export const TestPreviewModal: React.FC<TestPreviewModalProps> = ({ test, onClos
                             {key}
                           </span>
                           {optEng && optHi && optEng.trim() !== optHi.trim() ? (
-                            <span className="inline-flex items-center gap-1.5 flex-wrap">
-                              <span className="font-semibold text-slate-900">{optEng}</span>
+                            <span className="inline-flex items-start gap-1.5 flex-wrap">
+                              <FormattedQuestionText
+                                text={optEng}
+                                className="font-semibold text-slate-900"
+                              />
                               <span className="text-slate-400 font-bold">/</span>
-                              <span className="text-slate-700">{optHi}</span>
+                              <FormattedQuestionText
+                                text={optHi}
+                                className="text-slate-700"
+                              />
                             </span>
                           ) : optEng || optHi ? (
-                            <span>{optEng || optHi}</span>
+                            <FormattedQuestionText text={optEng || optHi} />
                           ) : (
                             <span className="italic text-slate-400">[Image Option]</span>
                           )}
@@ -152,10 +161,20 @@ export const TestPreviewModal: React.FC<TestPreviewModalProps> = ({ test, onClos
               </div>
 
               {(currentQ.explanationHindi || currentQ.explanation) && (
-                <div className="p-3.5 bg-slate-100 rounded-xl border border-slate-200 text-xs space-y-1">
+                <div className="p-3.5 bg-slate-100 rounded-xl border border-slate-200 text-xs space-y-1.5">
                   <span className="font-bold text-slate-800 block">Explanation:</span>
-                  {currentQ.explanation && <p className="text-slate-800">{currentQ.explanation}</p>}
-                  {currentQ.explanationHindi && !currentQ.explanation && <p className="text-slate-800">{currentQ.explanationHindi}</p>}
+                  {currentQ.explanation && (
+                    <FormattedQuestionText
+                      text={currentQ.explanation}
+                      className="text-slate-800 leading-relaxed"
+                    />
+                  )}
+                  {currentQ.explanationHindi && (
+                    <FormattedQuestionText
+                      text={currentQ.explanationHindi}
+                      className="text-slate-800 leading-relaxed"
+                    />
+                  )}
                 </div>
               )}
             </div>
