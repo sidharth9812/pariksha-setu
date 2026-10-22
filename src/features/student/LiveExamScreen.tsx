@@ -5,17 +5,13 @@ import {
   ChevronRight,
   Bookmark,
   RotateCcw,
-  CheckCircle2,
-  XCircle,
-  HelpCircle,
-  Menu,
   X,
-  Wifi,
   WifiOff,
   AlertTriangle,
   Send,
   Languages,
   ShieldAlert,
+  LayoutGrid,
 } from 'lucide-react';
 import {
   TestItem,
@@ -62,16 +58,15 @@ export const LiveExamScreen: React.FC<LiveExamScreenProps> = ({
   const visitedStorageKey = `pariksha_visited_${test.id}_${effectiveStudentId}`;
   const tabSwitchesKey = `pariksha_tab_switches_${test.id}_${effectiveStudentId}`;
 
-  // Guard against rejoining after submission:
+  // Guard against rejoining after submission
   useEffect(() => {
     let isCancelled = false;
     async function checkSubmitted() {
-      // Released tests or active reattempts are open for unlimited attempts!
-      // Do NOT kick out of live exam screen.
       const isReattempt =
         test.status === 'released' ||
         (typeof window !== 'undefined' &&
-          localStorage.getItem(`pariksha_is_reattempt_${test.id}_${effectiveStudentId}`) === 'true');
+          localStorage.getItem(`pariksha_is_reattempt_${test.id}_${effectiveStudentId}`) ===
+            'true');
 
       if (isReattempt) return;
 
@@ -141,7 +136,6 @@ export const LiveExamScreen: React.FC<LiveExamScreenProps> = ({
 
   // Authoritative server-calculated remaining seconds
   const [remainingSeconds, setRemainingSeconds] = useState<number>(() => {
-    // If test is released or candidate is reattempting, give full test duration:
     const isReattempt =
       test.status === 'released' ||
       (typeof window !== 'undefined' &&
@@ -265,10 +259,10 @@ export const LiveExamScreen: React.FC<LiveExamScreenProps> = ({
 
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
-    // Prevent accidental page leave
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
       e.preventDefault();
-      e.returnValue = 'You have an active examination in progress. Are you sure you want to leave?';
+      e.returnValue =
+        'You have an active examination in progress. Are you sure you want to leave?';
     };
     window.addEventListener('beforeunload', handleBeforeUnload);
 
@@ -294,14 +288,14 @@ export const LiveExamScreen: React.FC<LiveExamScreenProps> = ({
     return () => clearInterval(timer);
   }, [test.id]);
 
-  // Real-time synchronization: Auto-submit if examination is ended by administrator (for scheduled/live exams only)
+  // Real-time synchronization: Auto-submit if examination is ended by administrator
   useEffect(() => {
     const isReattempt =
       test.status === 'released' ||
       (typeof window !== 'undefined' &&
         localStorage.getItem(`pariksha_is_reattempt_${test.id}_${effectiveStudentId}`) === 'true');
 
-    if (isReattempt) return; // Active reattempts remain active until candidate finishes
+    if (isReattempt) return;
     const unsub = subscribeToTest(test.id, (liveTest) => {
       if (liveTest.status === 'completed' || liveTest.status === 'result_published') {
         handleFinalSubmit(true);
@@ -315,11 +309,30 @@ export const LiveExamScreen: React.FC<LiveExamScreenProps> = ({
     const hours = Math.floor(remainingSeconds / 3600);
     const minutes = Math.floor((remainingSeconds % 3600) / 60);
     const seconds = remainingSeconds % 60;
-    return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+    return `${hours.toString().padStart(2, '0')}:${minutes
+      .toString()
+      .padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
   }, [remainingSeconds]);
+
+  // Distinct subject sections for section switcher tabs
+  const sections = useMemo(() => {
+    const map = new Map<string, { name: string; firstIndex: number; count: number }>();
+    questions.forEach((q, idx) => {
+      const subj = (q.subject || test.subject || test.examCategory || 'General').trim();
+      const existing = map.get(subj);
+      if (existing) {
+        existing.count += 1;
+      } else {
+        map.set(subj, { name: subj, firstIndex: idx, count: 1 });
+      }
+    });
+    return Array.from(map.values());
+  }, [questions, test.subject, test.examCategory]);
 
   // Current Question
   const currentQuestion = questions[currentIndex] || null;
+  const currentSubject =
+    (currentQuestion?.subject || test.subject || test.examCategory || 'General').trim();
 
   // Answer handler
   const handleSelectOption = (optionKey: 'A' | 'B' | 'C' | 'D') => {
@@ -353,6 +366,8 @@ export const LiveExamScreen: React.FC<LiveExamScreenProps> = ({
   const handleSaveAndNext = () => {
     if (currentIndex < questions.length - 1) {
       setCurrentIndex((i) => i + 1);
+    } else {
+      setShowSubmitModal(true);
     }
   };
 
@@ -360,6 +375,10 @@ export const LiveExamScreen: React.FC<LiveExamScreenProps> = ({
     if (currentIndex > 0) {
       setCurrentIndex((i) => i - 1);
     }
+  };
+
+  const cycleLanguageMode = () => {
+    setLanguageMode((prev) => (prev === 'both' ? 'en' : prev === 'en' ? 'hi' : 'both'));
   };
 
   // Submission handler
@@ -383,7 +402,6 @@ export const LiveExamScreen: React.FC<LiveExamScreenProps> = ({
         activityLogs,
       });
 
-      // Clear in-progress storage and cache completed attempt
       try {
         localStorage.removeItem(answersStorageKey);
         localStorage.removeItem(reviewStorageKey);
@@ -391,7 +409,10 @@ export const LiveExamScreen: React.FC<LiveExamScreenProps> = ({
         localStorage.removeItem(tabSwitchesKey);
         localStorage.removeItem(`pariksha_is_reattempt_${test.id}_${effectiveStudentId}`);
         localStorage.setItem(`pariksha_attempt_${test.id}`, JSON.stringify(attempt));
-        localStorage.setItem(`pariksha_attempt_${test.id}_${studentName.toLowerCase().trim()}`, JSON.stringify(attempt));
+        localStorage.setItem(
+          `pariksha_attempt_${test.id}_${studentName.toLowerCase().trim()}`,
+          JSON.stringify(attempt)
+        );
       } catch {
         // ignore
       }
@@ -442,7 +463,11 @@ export const LiveExamScreen: React.FC<LiveExamScreenProps> = ({
     };
   }, [questions, answers, markedForReview, visited]);
 
-  // Question navigation status resolver
+  const progressPercentage = useMemo(() => {
+    if (questions.length === 0) return 0;
+    return Math.min(100, Math.round((stats.answered / questions.length) * 100));
+  }, [stats.answered, questions.length]);
+
   const getQuestionNavStatus = (qId: string): QuestionNavStatus => {
     const hasAnswer = Boolean(answers[qId]);
     const isReview = markedForReview.includes(qId);
@@ -457,185 +482,222 @@ export const LiveExamScreen: React.FC<LiveExamScreenProps> = ({
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-slate-100 flex items-center justify-center p-4">
-        <div className="bg-white p-6 rounded-2xl shadow-sm text-center space-y-3">
-          <div className="w-10 h-10 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin mx-auto" />
-          <p className="text-sm font-semibold text-slate-700">Loading Examination Paper...</p>
+      <div className="min-h-screen bg-surface flex items-center justify-center p-4 font-body text-on-surface">
+        <div className="bg-surface-container-lowest p-6 rounded-2xl shadow-xs border border-outline-variant/20 text-center space-y-3 max-w-xs w-full">
+          <div className="w-10 h-10 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto" />
+          <p className="font-headline text-sm font-bold text-on-surface">
+            Loading Examination Paper...
+          </p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-slate-100 flex flex-col justify-between select-none">
+    <div className="min-h-screen bg-surface font-body text-on-surface flex flex-col justify-between select-none antialiased">
       {/* =========================================================
-          TOP BAR (Mobile Ergonomic)
+          TOP UTILITY CONTEXT BAR (Aspirant Neo Exam Header)
       ========================================================= */}
-      <header className="sticky top-0 z-30 bg-slate-900 text-white shadow-md">
-        <div className="max-w-7xl mx-auto px-3 sm:px-6 py-2.5 flex items-center justify-between gap-2">
-          {/* Test Name & Progress */}
-          <div className="min-w-0 flex-1">
-            <h1 className="text-xs sm:text-sm font-bold truncate leading-tight text-slate-100">
+      <header className="sticky top-0 z-40 bg-surface/95 backdrop-blur-md border-b border-outline-variant/20">
+        {/* Row 1: Exam Title, Language Toggle, Countdown Timer Pill & Submit */}
+        <div className="max-w-5xl mx-auto px-4 py-2.5 flex items-center justify-between gap-2">
+          <div className="flex flex-col min-w-0 flex-1">
+            <span className="text-[10px] font-headline font-bold uppercase tracking-wider text-on-surface-variant truncate">
+              {test.examCategory || 'ParikshaSetu Assessment'}
+            </span>
+            <h1 className="font-headline font-bold text-sm sm:text-base text-on-surface truncate">
               {test.title}
             </h1>
-            <div className="flex items-center gap-2 text-[11px] text-slate-400 mt-0.5">
-              <span>
-                Q {currentIndex + 1} of {questions.length}
-              </span>
-              <span>&bull;</span>
-              <span className="text-emerald-400 font-semibold">{stats.answered} Answered</span>
-            </div>
           </div>
 
-          {/* Synchronized Timer */}
-          <div
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-mono text-sm sm:text-base font-bold shadow-inner ${
-              remainingSeconds < 300
-                ? 'bg-red-600 text-white animate-pulse'
-                : 'bg-slate-800 text-amber-300 border border-slate-700'
-            }`}
-          >
-            <Clock className="w-4 h-4 shrink-0 text-amber-400" />
-            <span>{formattedTime}</span>
-          </div>
-
-          {/* Action buttons (Questions Drawer Toggle & Submit) */}
-          <div className="flex items-center gap-1.5">
-            {/* Offline practice mode indicator */}
+          <div className="flex items-center gap-2 shrink-0">
             {!isOnline && (
               <span
-                title="Offline Practice Mode: Working disconnected from internet. All questions, diagrams, and answers are saved securely on this device."
-                className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-amber-500/20 border border-amber-400/40 text-amber-300 rounded-lg text-xs font-bold"
+                title="Offline Practice Mode: Answers saved locally"
+                className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-tertiary-fixed text-on-tertiary-fixed text-[10px] font-headline font-bold"
               >
-                <WifiOff className="w-3.5 h-3.5 text-amber-400" />
-                <span className="hidden sm:inline">Offline Practice</span>
+                <WifiOff className="w-3 h-3" />
+                <span className="hidden sm:inline">Offline</span>
               </span>
             )}
 
-            {/* Mobile Questions Drawer Button */}
+            {/* Bilingual / Language Toggle Pill */}
             <button
-              onClick={() => setIsDrawerOpen(true)}
-              className="px-2.5 sm:px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 cursor-pointer shadow-xs transition-colors"
+              type="button"
+              onClick={cycleLanguageMode}
+              className="flex items-center gap-1 bg-primary-fixed text-on-primary-fixed px-2.5 py-1.5 rounded-lg text-xs font-headline font-bold active:scale-95 transition-transform cursor-pointer"
+              title="Toggle Question Language (ENG / HIN / Both)"
             >
-              <Menu className="w-4 h-4" />
-              <span className="hidden sm:inline">Questions</span>
-              <span className="bg-indigo-800 text-[10px] px-1.5 py-0.5 rounded-full font-mono">
-                {stats.answered}/{questions.length}
+              <Languages className="w-3.5 h-3.5" />
+              <span>
+                {languageMode === 'both'
+                  ? 'ENG / HIN'
+                  : languageMode === 'en'
+                  ? 'ENG ONLY'
+                  : 'HIN ONLY'}
               </span>
             </button>
 
-            {/* Submit Button */}
-            <button
-              onClick={() => setShowSubmitModal(true)}
-              className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold cursor-pointer transition-colors shadow-xs"
+            {/* Dynamic Countdown Timer Pill */}
+            <div
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border tabular-nums ${
+                remainingSeconds < 300
+                  ? 'bg-error text-on-error border-error animate-pulse'
+                  : 'bg-surface-container-low text-on-surface border-outline-variant/30'
+              }`}
             >
-              Submit
+              <Clock
+                className={`w-4 h-4 shrink-0 ${
+                  remainingSeconds < 300 ? 'text-on-error' : 'text-primary'
+                }`}
+              />
+              <span className="font-headline font-extrabold text-sm tracking-tight tabular-nums">
+                {formattedTime}
+              </span>
+            </div>
+
+            {/* Quick Submit Button */}
+            <button
+              type="button"
+              onClick={() => setShowSubmitModal(true)}
+              className="hidden sm:inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-primary text-on-primary font-headline font-bold text-xs shadow-2xs active:scale-95 transition-all cursor-pointer"
+            >
+              <span>Submit</span>
             </button>
           </div>
+        </div>
+
+        {/* Row 2: Section Switcher Tabs */}
+        <div className="bg-surface-container-low border-t border-outline-variant/10">
+          <div className="max-w-5xl mx-auto px-4 py-2 flex items-center justify-between gap-2 overflow-x-auto no-scrollbar">
+            <div className="flex items-center gap-2">
+              {sections.map((sec) => {
+                const isActiveSec = currentSubject === sec.name;
+                return (
+                  <button
+                    key={sec.name}
+                    type="button"
+                    onClick={() => setCurrentIndex(sec.firstIndex)}
+                    className={`shrink-0 px-3 py-1 rounded-md text-xs font-headline font-bold transition-colors cursor-pointer ${
+                      isActiveSec
+                        ? 'bg-primary text-on-primary shadow-2xs'
+                        : 'bg-surface-container-lowest text-on-surface-variant hover:text-on-surface border border-outline-variant/25'
+                    }`}
+                  >
+                    {sec.name} ({sec.count})
+                  </button>
+                );
+              })}
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setShowSubmitModal(true)}
+              className="sm:hidden shrink-0 px-2.5 py-1 rounded-md bg-primary/10 text-primary font-headline font-bold text-xs cursor-pointer"
+            >
+              Submit Test
+            </button>
+          </div>
+        </div>
+
+        {/* Real-Time Micro Progress Bar */}
+        <div className="w-full h-1 bg-surface-container-highest">
+          <div
+            className="h-full bg-primary transition-all duration-300"
+            style={{ width: `${progressPercentage}%` }}
+          />
         </div>
       </header>
 
       {/* =========================================================
-          MAIN QUESTION AREA (One Question At A Time)
+          MAIN QUESTION WORKSPACE
       ========================================================= */}
-      <main className="flex-1 max-w-4xl w-full mx-auto p-3 sm:p-6 pb-28">
+      <main className="flex-1 max-w-4xl w-full mx-auto px-4 pt-4 pb-28 space-y-4">
         {currentQuestion ? (
-          <div className="bg-white rounded-2xl shadow-xs border border-slate-200 overflow-hidden space-y-4">
-            {/* Question Header & Controls */}
-            <div className="bg-slate-50 px-4 sm:px-6 py-3 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2">
-              <div className="flex items-center gap-2">
-                <span className="px-2.5 py-1 bg-indigo-600 text-white text-xs font-bold rounded-lg">
-                  Question {currentIndex + 1}
+          <>
+            {/* Question Meta Header Card */}
+            <div className="flex items-center justify-between bg-surface-container-lowest p-3.5 rounded-xl shadow-2xs border border-outline-variant/15">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="font-headline font-extrabold text-sm text-primary tabular-nums">
+                  Question {currentIndex + 1} of {questions.length}
                 </span>
-                {currentQuestion.subject && (
-                  <span className="text-xs font-medium text-slate-600 bg-slate-200/80 px-2 py-0.5 rounded-md">
-                    {currentQuestion.subject}
-                  </span>
-                )}
-                {markedForReview.includes(currentQuestion.id) && (
-                  <span className="text-xs font-bold text-purple-700 bg-purple-50 px-2 py-0.5 rounded-md border border-purple-200 flex items-center gap-1">
-                    <Bookmark className="w-3 h-3 fill-purple-600" />
-                    Review
-                  </span>
-                )}
+                <span className="px-2 py-0.5 rounded bg-surface-container text-[11px] font-headline font-bold text-on-surface-variant tabular-nums">
+                  +{test.marksPerQuestion} | -{test.negativeMarks}
+                </span>
               </div>
 
-              {/* Marks & Language Toggle */}
-              <div className="flex items-center gap-3 text-xs">
-                <div className="flex items-center gap-1 text-slate-500">
-                  <span className="text-emerald-600 font-bold">+{test.marksPerQuestion}</span>
-                  <span>/</span>
-                  <span className="text-red-500 font-bold">-{test.negativeMarks}</span>
-                </div>
-
-                {/* Hindi/English Toggle */}
-                {currentQuestion.questionTextHindi && (
-                  <div className="flex items-center border border-slate-200 rounded-lg p-0.5 bg-white">
-                    <button
-                      onClick={() => setLanguageMode('both')}
-                      className={`px-1.5 py-0.5 text-[11px] rounded font-medium cursor-pointer ${
-                        languageMode === 'both' ? 'bg-indigo-50 text-indigo-700 font-bold' : 'text-slate-500'
-                      }`}
-                    >
-                      Bilingual
-                    </button>
-                    <button
-                      onClick={() => setLanguageMode('hi')}
-                      className={`px-1.5 py-0.5 text-[11px] rounded font-medium cursor-pointer ${
-                        languageMode === 'hi' ? 'bg-indigo-50 text-indigo-700 font-bold' : 'text-slate-500'
-                      }`}
-                    >
-                      Hindi
-                    </button>
-                    <button
-                      onClick={() => setLanguageMode('en')}
-                      className={`px-1.5 py-0.5 text-[11px] rounded font-medium cursor-pointer ${
-                        languageMode === 'en' ? 'bg-indigo-50 text-indigo-700 font-bold' : 'text-slate-500'
-                      }`}
-                    >
-                      English
-                    </button>
-                  </div>
-                )}
-              </div>
+              <button
+                type="button"
+                onClick={handleToggleReview}
+                className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-headline font-semibold transition-colors cursor-pointer ${
+                  markedForReview.includes(currentQuestion.id)
+                    ? 'bg-tertiary-fixed text-on-tertiary-fixed font-bold'
+                    : 'text-on-surface-variant hover:text-primary hover:bg-surface-container-low'
+                }`}
+              >
+                <Bookmark
+                  className={`w-4 h-4 ${
+                    markedForReview.includes(currentQuestion.id) ? 'fill-current' : ''
+                  }`}
+                />
+                <span>
+                  {markedForReview.includes(currentQuestion.id)
+                    ? 'Marked for Review'
+                    : 'Mark for Review'}
+                </span>
+              </button>
             </div>
 
-            {/* Question Text */}
-            <div className="px-4 sm:px-6 pt-2 pb-4 space-y-3">
-              {/* Primary English question */}
-              {(languageMode === 'both' || languageMode === 'en') && (
-                <FormattedQuestionText
-                  text={currentQuestion.questionText}
-                  className="text-base sm:text-lg font-semibold text-slate-900 leading-relaxed font-sans"
-                />
-              )}
-
-              {/* Secondary/Alternative question */}
-              {(languageMode === 'both' || languageMode === 'hi') && currentQuestion.questionTextHindi && (
-                <div className="pt-2 border-t border-slate-100">
-                  <FormattedQuestionText
-                    text={currentQuestion.questionTextHindi}
-                    className="text-sm sm:text-base text-slate-600 leading-relaxed"
-                  />
+            {/* Question Content Box (Bilingual / Formatted Display) */}
+            <article className="bg-surface-container-lowest p-5 rounded-xl shadow-2xs border border-outline-variant/15 space-y-3">
+              {currentQuestion.subject && (
+                <div className="inline-block px-2 py-0.5 rounded bg-primary-fixed text-on-primary-fixed text-[10px] font-headline font-bold uppercase tracking-wider">
+                  {currentQuestion.subject}
                 </div>
               )}
 
-              {/* Optional Question Diagram / Image from Cloudinary or Firebase */}
+              {/* Primary English Question */}
+              {(languageMode === 'both' || languageMode === 'en') &&
+                currentQuestion.questionText && (
+                  <FormattedQuestionText
+                    text={currentQuestion.questionText}
+                    className="text-[15px] sm:text-base leading-relaxed font-medium text-on-surface"
+                  />
+                )}
+
+              {/* Secondary Hindi Question */}
+              {(languageMode === 'both' || languageMode === 'hi') &&
+                currentQuestion.questionTextHindi && (
+                  <div
+                    className={
+                      languageMode === 'both' && currentQuestion.questionText
+                        ? 'pt-2.5 border-t border-outline-variant/20'
+                        : ''
+                    }
+                  >
+                    <FormattedQuestionText
+                      text={currentQuestion.questionTextHindi}
+                      className="text-sm sm:text-[15px] leading-relaxed font-normal text-on-surface-variant"
+                    />
+                  </div>
+                )}
+
+              {/* Question Diagram / Image */}
               {(currentQuestion.questionImageUrl || currentQuestion.imageUrl) && (
                 <div className="pt-2">
-                  <div className="max-w-md rounded-xl overflow-hidden border border-slate-200 shadow-xs bg-slate-50">
+                  <div className="max-w-md rounded-xl overflow-hidden border border-outline-variant/25 bg-surface-container-low p-2">
                     <CachedImage
                       src={currentQuestion.questionImageUrl || currentQuestion.imageUrl}
                       alt="Question Diagram"
-                      className="w-full h-auto max-h-64 object-contain mx-auto bg-white"
+                      className="w-full h-auto max-h-64 object-contain mx-auto bg-white rounded-lg"
                     />
                   </div>
                 </div>
               )}
-            </div>
+            </article>
 
-            {/* Multiple Choice Options */}
-            <div className="px-4 sm:px-6 pb-6 space-y-3">
+            {/* Option Selection Rows */}
+            <div className="space-y-2.5">
               {(['A', 'B', 'C', 'D'] as const).map((key) => {
                 const optEng = currentQuestion.options?.[key];
                 const optHindi = currentQuestion.optionsHindi?.[key];
@@ -645,235 +707,295 @@ export const LiveExamScreen: React.FC<LiveExamScreenProps> = ({
                 const isSelected = answers[currentQuestion.id] === key;
 
                 return (
-                  <div
+                  <button
                     key={key}
+                    type="button"
                     onClick={() => handleSelectOption(key)}
-                    className={`relative p-3.5 sm:p-4 rounded-xl border-2 cursor-pointer transition-all flex items-start gap-3.5 ${
+                    className={`w-full text-left p-4 rounded-xl transition-all flex items-start gap-3.5 active:scale-[0.99] cursor-pointer ${
                       isSelected
-                        ? 'border-indigo-600 bg-indigo-50/60 shadow-xs'
-                        : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50/60 bg-white'
+                        ? 'bg-primary/5 border-2 border-primary shadow-2xs'
+                        : 'bg-surface-container-lowest border border-outline-variant/30 hover:border-primary/40'
                     }`}
                   >
-                    {/* Key badge indicator (Radio look) */}
-                    <div
-                      className={`w-7 h-7 rounded-full flex items-center justify-center font-bold text-xs shrink-0 transition-colors ${
+                    {/* Option Letter Pill */}
+                    <span
+                      className={`w-8 h-8 rounded-full font-headline font-bold text-xs flex items-center justify-center shrink-0 transition-colors ${
                         isSelected
-                          ? 'bg-indigo-600 text-white'
-                          : 'bg-slate-100 text-slate-700 border border-slate-300'
+                          ? 'bg-primary text-on-primary shadow-2xs'
+                          : 'bg-surface-container text-on-surface-variant'
                       }`}
                     >
                       {key}
-                    </div>
+                    </span>
 
-                    {/* Option Content: Stacked with text above and image below */}
-                    <div className="flex-1 text-sm sm:text-base text-slate-800 space-y-2.5 min-w-0">
+                    {/* Option Content */}
+                    <div className="flex-1 min-w-0 space-y-2 pt-1">
                       {(optEng || optHindi) && (
                         <div>
-                          {languageMode === 'both' && optEng && optHindi && optEng.trim() !== optHindi.trim() ? (
-                            <div className="flex flex-wrap items-start gap-1.5 sm:gap-2">
+                          {languageMode === 'both' &&
+                          optEng &&
+                          optHindi &&
+                          optEng.trim() !== optHindi.trim() ? (
+                            <div className="flex flex-wrap items-start gap-1.5">
                               <FormattedQuestionText
                                 text={optEng}
-                                className="font-semibold text-slate-900"
+                                className={`text-sm ${
+                                  isSelected
+                                    ? 'font-bold text-on-surface'
+                                    : 'font-medium text-on-surface'
+                                }`}
                               />
-                              <span className="text-slate-400 font-bold">/</span>
+                              <span className="text-outline font-bold">/</span>
                               <FormattedQuestionText
                                 text={optHindi}
-                                className="font-medium text-slate-800"
+                                className={`text-sm ${
+                                  isSelected
+                                    ? 'font-semibold text-on-surface'
+                                    : 'font-normal text-on-surface-variant'
+                                }`}
                               />
                             </div>
                           ) : languageMode === 'hi' ? (
                             <FormattedQuestionText
                               text={optHindi || optEng}
-                              className="font-medium text-slate-900"
+                              className={`text-sm ${
+                                isSelected
+                                  ? 'font-bold text-on-surface'
+                                  : 'font-medium text-on-surface'
+                              }`}
                             />
                           ) : (
                             <FormattedQuestionText
                               text={optEng || optHindi}
-                              className="font-medium text-slate-900"
+                              className={`text-sm ${
+                                isSelected
+                                  ? 'font-bold text-on-surface'
+                                  : 'font-medium text-on-surface'
+                              }`}
                             />
                           )}
                         </div>
                       )}
 
                       {optImage?.imageUrl && (
-                        <div className="max-w-md rounded-xl overflow-hidden border border-slate-200 bg-white p-1.5 shadow-2xs">
+                        <div className="max-w-xs rounded-xl overflow-hidden border border-outline-variant/25 bg-white p-1.5">
                           <CachedImage
                             src={optImage.imageUrl}
-                            alt={`Option ${key} image`}
-                            className="w-auto h-auto max-h-52 object-contain rounded"
+                            alt={`Option ${key} diagram`}
+                            className="w-auto h-auto max-h-48 object-contain rounded"
                             loading="lazy"
                           />
                         </div>
                       )}
                     </div>
-                  </div>
+
+                    {/* Radio Indicator Dot */}
+                    <span
+                      className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 mt-1.5 ${
+                        isSelected ? 'border-primary' : 'border-outline-variant'
+                      }`}
+                    >
+                      {isSelected && <span className="w-2.5 h-2.5 rounded-full bg-primary" />}
+                    </span>
+                  </button>
                 );
               })}
             </div>
-          </div>
+
+            {/* Quick Palette Trigger Bar */}
+            <div className="bg-surface-container-low p-3.5 rounded-xl flex items-center justify-between border border-outline-variant/15">
+              <div className="flex items-center gap-2">
+                <LayoutGrid className="w-4 h-4 text-primary" />
+                <span className="text-xs font-headline font-semibold text-on-surface">
+                  Overall Attempt Status
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsDrawerOpen(true)}
+                className="flex items-center gap-2 text-xs font-headline font-bold text-primary cursor-pointer"
+              >
+                <span className="px-2 py-0.5 rounded bg-primary/10 text-primary tabular-nums">
+                  {stats.answered}/{questions.length} Answered
+                </span>
+                <ChevronRight className="w-4 h-4" />
+              </button>
+            </div>
+          </>
         ) : (
-          <div className="text-center py-12 text-slate-500">No question available.</div>
+          <div className="text-center py-12 text-on-surface-variant">No question available.</div>
         )}
       </main>
 
       {/* =========================================================
-          BOTTOM ERGONOMIC CONTROL BAR (Fixed thumb reach for mobile)
+          STICKY BOTTOM FLOATING ACTION STRIP
       ========================================================= */}
-      <footer className="fixed bottom-0 inset-x-0 bg-white border-t border-slate-200 py-3 px-3 sm:px-6 z-30 shadow-lg">
+      <footer className="fixed bottom-0 left-0 right-0 z-40 bg-surface/95 backdrop-blur-lg border-t border-outline-variant/20 px-4 py-3">
         <div className="max-w-4xl mx-auto flex items-center justify-between gap-2">
-          {/* Previous Button */}
+          {/* Clear Response */}
           <button
-            onClick={handlePrevious}
-            disabled={currentIndex === 0}
-            className="flex-1 sm:flex-none px-3 sm:px-4 py-2.5 rounded-xl border border-slate-300 text-slate-700 font-semibold text-xs sm:text-sm hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-1 cursor-pointer transition-colors"
+            type="button"
+            onClick={handleClearResponse}
+            disabled={!currentQuestion || !answers[currentQuestion.id]}
+            className="px-3 py-2.5 rounded-lg bg-surface-container text-on-surface-variant font-headline font-bold text-xs hover:bg-surface-container-high active:scale-95 transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1"
           >
-            <ChevronLeft className="w-4 h-4" />
-            <span>Previous</span>
+            <RotateCcw className="w-3.5 h-3.5" />
+            <span>Clear</span>
           </button>
 
-          {/* Middle Buttons: Clear & Mark for Review */}
-          <div className="flex items-center gap-2">
-            {currentQuestion && answers[currentQuestion.id] && (
-              <button
-                onClick={handleClearResponse}
-                title="Clear Response"
-                className="px-2.5 sm:px-3 py-2.5 rounded-xl text-xs font-semibold text-slate-600 hover:text-red-600 hover:bg-red-50 border border-slate-200 cursor-pointer transition-colors"
-              >
-                <RotateCcw className="w-4 h-4 inline sm:mr-1" />
-                <span className="hidden sm:inline">Clear</span>
-              </button>
-            )}
-
-            <button
-              onClick={handleToggleReview}
-              className={`px-3 py-2.5 rounded-xl text-xs font-semibold flex items-center gap-1 transition-colors cursor-pointer border ${
-                currentQuestion && markedForReview.includes(currentQuestion.id)
-                  ? 'bg-purple-100 text-purple-900 border-purple-300'
-                  : 'bg-slate-50 hover:bg-purple-50 text-slate-700 hover:text-purple-700 border-slate-200'
-              }`}
-            >
-              <Bookmark className="w-4 h-4" />
-              <span className="hidden sm:inline">Mark Review</span>
-              <span className="sm:hidden">Review</span>
-            </button>
-          </div>
-
-          {/* Save & Next / Next Button */}
+          {/* Question Palette Trigger */}
           <button
-            onClick={handleSaveAndNext}
-            disabled={currentIndex === questions.length - 1}
-            className="flex-1 sm:flex-none px-4 sm:px-6 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs sm:text-sm disabled:opacity-50 disabled:bg-slate-300 flex items-center justify-center gap-1 cursor-pointer transition-colors shadow-xs"
+            type="button"
+            onClick={() => setIsDrawerOpen(true)}
+            className="px-3 py-2.5 rounded-lg bg-surface-container-low border border-outline-variant/30 text-on-surface font-headline font-bold text-xs flex items-center gap-1.5 active:scale-95 transition-all cursor-pointer"
           >
-            <span>Save & Next</span>
+            <LayoutGrid className="w-4 h-4 text-primary" />
+            <span>Palette</span>
+            <span className="px-1.5 py-0.5 rounded bg-primary-fixed text-on-primary-fixed text-[10px] tabular-nums">
+              {stats.answered}/{questions.length}
+            </span>
+          </button>
+
+          {/* Previous */}
+          <button
+            type="button"
+            onClick={handlePrevious}
+            disabled={currentIndex === 0}
+            className="px-3 py-2.5 rounded-lg bg-surface-container text-on-surface font-headline font-bold text-xs flex items-center gap-1 active:scale-95 transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            <ChevronLeft className="w-4 h-4" />
+            <span>Prev</span>
+          </button>
+
+          {/* Save & Next / Submit */}
+          <button
+            type="button"
+            onClick={handleSaveAndNext}
+            className="flex-1 sm:flex-none bg-linear-to-r from-primary to-primary-container text-on-primary font-headline font-bold text-xs sm:text-sm py-2.5 px-5 rounded-lg shadow-sm flex items-center justify-center gap-1.5 active:scale-95 transition-all cursor-pointer"
+          >
+            <span>
+              {currentIndex === questions.length - 1 ? 'Review & Submit' : 'Save & Next'}
+            </span>
             <ChevronRight className="w-4 h-4" />
           </button>
         </div>
       </footer>
 
       {/* =========================================================
-          QUESTION STATUS NAVIGATION DRAWER / MODAL
+          SLIDE-UP QUESTION PALETTE BOTTOM SHEET
       ========================================================= */}
       {isDrawerOpen && (
-        <div className="fixed inset-0 z-50 overflow-hidden bg-slate-900/60 backdrop-blur-xs flex justify-end">
-          <div className="w-full max-w-md bg-white h-full shadow-2xl flex flex-col animate-in slide-in-from-right duration-200">
-            {/* Drawer Header */}
-            <div className="p-4 bg-slate-900 text-white flex items-center justify-between">
+        <div className="fixed inset-0 z-50 bg-on-surface/40 backdrop-blur-xs flex items-end justify-center">
+          <div className="fixed inset-0" onClick={() => setIsDrawerOpen(false)} />
+          <div className="relative w-full max-w-lg bg-surface-container-lowest rounded-t-3xl p-5 space-y-4 max-h-[82vh] flex flex-col shadow-2xl z-10 border-t border-outline-variant/20">
+            <div className="w-10 h-1 bg-outline-variant/50 rounded-full mx-auto" />
+            <div className="flex items-center justify-between border-b border-outline-variant/20 pb-3">
               <div>
-                <h3 className="font-bold text-sm">Question Navigation</h3>
-                <p className="text-xs text-slate-400">Tap question number to jump</p>
+                <h2 className="font-headline font-bold text-base text-on-surface">
+                  Question Palette
+                </h2>
+                <p className="text-xs text-on-surface-variant">{test.title}</p>
               </div>
               <button
+                type="button"
                 onClick={() => setIsDrawerOpen(false)}
-                className="p-1.5 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white cursor-pointer"
+                className="w-8 h-8 rounded-full bg-surface-container flex items-center justify-center text-on-surface-variant cursor-pointer"
               >
-                <X className="w-5 h-5" />
+                <X className="w-4 h-4" />
               </button>
             </div>
 
-            {/* Legend & Summary Counts */}
-            <div className="p-4 bg-slate-50 border-b border-slate-200 grid grid-cols-2 gap-2 text-xs">
-              <div className="flex items-center gap-2 p-1.5 rounded-lg bg-emerald-50 text-emerald-800 border border-emerald-200">
-                <span className="w-3 h-3 rounded-full bg-emerald-600 shrink-0" />
-                <span className="font-bold">{stats.answered}</span>
-                <span className="text-slate-600">Answered</span>
+            {/* 4-State Status Legend */}
+            <div className="grid grid-cols-2 gap-2 text-xs">
+              <div className="flex items-center gap-2 bg-surface-container-low p-2 rounded-lg">
+                <span className="w-3 h-3 rounded-sm bg-primary shrink-0" />
+                <span className="text-on-surface-variant font-medium">
+                  Answered:{' '}
+                  <strong className="text-on-surface tabular-nums">{stats.answered}</strong>
+                </span>
               </div>
-
-              <div className="flex items-center gap-2 p-1.5 rounded-lg bg-rose-50 text-rose-800 border border-rose-200">
-                <span className="w-3 h-3 rounded-full bg-rose-600 shrink-0" />
-                <span className="font-bold">{stats.notAnswered}</span>
-                <span className="text-slate-600">Not Answered</span>
+              <div className="flex items-center gap-2 bg-surface-container-low p-2 rounded-lg">
+                <span className="w-3 h-3 rounded-sm bg-error shrink-0" />
+                <span className="text-on-surface-variant font-medium">
+                  Not Answered:{' '}
+                  <strong className="text-on-surface tabular-nums">{stats.notAnswered}</strong>
+                </span>
               </div>
-
-              <div className="flex items-center gap-2 p-1.5 rounded-lg bg-purple-50 text-purple-800 border border-purple-200">
-                <span className="w-3 h-3 rounded-full bg-purple-600 shrink-0" />
-                <span className="font-bold">{stats.reviewOnly}</span>
-                <span className="text-slate-600">Marked Review</span>
+              <div className="flex items-center gap-2 bg-surface-container-low p-2 rounded-lg">
+                <span className="w-3 h-3 rounded-sm bg-tertiary-container shrink-0" />
+                <span className="text-on-surface-variant font-medium">
+                  Marked Review:{' '}
+                  <strong className="text-on-surface tabular-nums">
+                    {stats.reviewOnly + stats.reviewAndAnswered}
+                  </strong>
+                </span>
               </div>
-
-              <div className="flex items-center gap-2 p-1.5 rounded-lg bg-slate-100 text-slate-700 border border-slate-300">
-                <span className="w-3 h-3 rounded-full bg-slate-300 shrink-0" />
-                <span className="font-bold">{stats.notVisited}</span>
-                <span className="text-slate-600">Not Visited</span>
-              </div>
-            </div>
-
-            {/* Grid of Question Numbers */}
-            <div className="flex-1 overflow-y-auto p-4">
-              <div className="grid grid-cols-5 sm:grid-cols-6 gap-2.5">
-                {questions.map((q, idx) => {
-                  const status = getQuestionNavStatus(q.id);
-                  const isCurrent = idx === currentIndex;
-
-                  let colorClasses = 'bg-white text-slate-700 border-slate-300';
-                  if (status === 'answered') {
-                    colorClasses = 'bg-emerald-600 text-white border-emerald-700';
-                  } else if (status === 'marked_and_answered') {
-                    colorClasses = 'bg-blue-600 text-white border-blue-700 ring-2 ring-purple-500';
-                  } else if (status === 'marked_for_review') {
-                    colorClasses = 'bg-purple-600 text-white border-purple-700';
-                  } else if (status === 'not_answered') {
-                    colorClasses = 'bg-rose-500 text-white border-rose-600';
-                  } else {
-                    colorClasses = 'bg-slate-100 text-slate-600 border-slate-300';
-                  }
-
-                  return (
-                    <button
-                      key={q.id}
-                      onClick={() => {
-                        setCurrentIndex(idx);
-                        setIsDrawerOpen(false);
-                      }}
-                      className={`h-11 rounded-xl font-bold text-xs flex flex-col items-center justify-center border-2 transition-transform active:scale-95 cursor-pointer relative ${colorClasses} ${
-                        isCurrent ? 'ring-3 ring-indigo-500 ring-offset-2' : ''
-                      }`}
-                    >
-                      <span>{idx + 1}</span>
-                      {status === 'marked_and_answered' && (
-                        <span className="w-1.5 h-1.5 rounded-full bg-white absolute bottom-1" />
-                      )}
-                    </button>
-                  );
-                })}
+              <div className="flex items-center gap-2 bg-surface-container-low p-2 rounded-lg">
+                <span className="w-3 h-3 rounded-sm bg-surface-container-highest border border-outline-variant shrink-0" />
+                <span className="text-on-surface-variant font-medium">
+                  Not Visited:{' '}
+                  <strong className="text-on-surface tabular-nums">{stats.notVisited}</strong>
+                </span>
               </div>
             </div>
 
-            {/* Drawer Bottom Actions */}
-            <div className="p-4 border-t border-slate-200 bg-slate-50 flex items-center gap-2">
+            {/* 5-Column Question Number Grid */}
+            <div className="grid grid-cols-5 gap-2.5 overflow-y-auto py-1">
+              {questions.map((q, idx) => {
+                const status = getQuestionNavStatus(q.id);
+                const isCurrent = idx === currentIndex;
+
+                let btnClass =
+                  'bg-surface-container text-on-surface-variant border border-outline-variant/30';
+                if (status === 'answered') {
+                  btnClass = 'bg-primary text-on-primary';
+                } else if (status === 'marked_and_answered') {
+                  btnClass = 'bg-primary text-on-primary ring-2 ring-tertiary-container';
+                } else if (status === 'marked_for_review') {
+                  btnClass = 'bg-tertiary-container text-on-tertiary';
+                } else if (status === 'not_answered') {
+                  btnClass = 'bg-error-container text-on-error-container font-bold';
+                }
+
+                return (
+                  <button
+                    key={q.id}
+                    type="button"
+                    onClick={() => {
+                      setCurrentIndex(idx);
+                      setIsDrawerOpen(false);
+                    }}
+                    className={`h-10 rounded-lg font-headline font-bold text-xs flex items-center justify-center tabular-nums cursor-pointer relative ${btnClass} ${
+                      isCurrent ? 'ring-2 ring-offset-2 ring-primary scale-105' : ''
+                    }`}
+                  >
+                    <span>{idx + 1}</span>
+                    {status === 'marked_and_answered' && (
+                      <span className="w-1.5 h-1.5 rounded-full bg-white absolute bottom-1" />
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Bottom Actions */}
+            <div className="pt-2 border-t border-outline-variant/20 flex gap-3">
               <button
+                type="button"
                 onClick={() => setIsDrawerOpen(false)}
-                className="flex-1 py-2.5 border border-slate-300 rounded-xl text-xs font-semibold text-slate-700 hover:bg-white"
+                className="flex-1 py-3 rounded-xl bg-surface-container text-on-surface font-headline font-bold text-xs cursor-pointer"
               >
-                Close Panel
+                Back to Test
               </button>
               <button
+                type="button"
                 onClick={() => {
                   setIsDrawerOpen(false);
                   setShowSubmitModal(true);
                 }}
-                className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-xs"
+                className="flex-1 py-3 rounded-xl bg-primary text-on-primary font-headline font-bold text-xs shadow-sm cursor-pointer"
               >
-                Submit Examination
+                Submit Test
               </button>
             </div>
           </div>
@@ -881,46 +1003,57 @@ export const LiveExamScreen: React.FC<LiveExamScreenProps> = ({
       )}
 
       {/* =========================================================
-          SUBMISSION CONFIRMATION MODAL (Manual Submission)
+          SUBMISSION CONFIRMATION MODAL
       ========================================================= */}
       {showSubmitModal && (
-        <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl max-w-md w-full shadow-2xl border border-slate-200 overflow-hidden animate-in fade-in zoom-in-95 duration-150">
-            <div className="bg-slate-900 px-6 py-4 text-white">
-              <h3 className="font-bold text-base">Submit Examination Confirmation</h3>
-              <p className="text-xs text-slate-400">Check your paper summary before final submit</p>
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-on-surface/50 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-surface-container-lowest rounded-2xl max-w-md w-full shadow-2xl border border-outline-variant/20 overflow-hidden">
+            <div className="bg-linear-to-r from-primary to-primary-container px-6 py-4 text-on-primary">
+              <h3 className="font-headline font-bold text-base">Submit Examination Confirmation</h3>
+              <p className="text-xs text-on-primary-container">
+                Review your attempt summary before final submission
+              </p>
             </div>
 
             <div className="p-6 space-y-4">
-              <div className="grid grid-cols-2 gap-3 text-center">
-                <div className="p-3 bg-emerald-50 rounded-xl border border-emerald-200">
-                  <span className="text-xs text-emerald-700 font-semibold block">Answered</span>
-                  <span className="text-2xl font-black text-emerald-700">{stats.answered}</span>
+              <div className="grid grid-cols-2 gap-3 text-center tabular-nums">
+                <div className="p-3 bg-primary-fixed/50 rounded-xl border border-primary/20">
+                  <span className="text-xs text-on-primary-fixed font-headline font-semibold block">
+                    Answered
+                  </span>
+                  <span className="text-2xl font-headline font-extrabold text-primary">
+                    {stats.answered}
+                  </span>
                 </div>
-                <div className="p-3 bg-rose-50 rounded-xl border border-rose-200">
-                  <span className="text-xs text-rose-700 font-semibold block">Unanswered</span>
-                  <span className="text-2xl font-black text-rose-700">{stats.unanswered}</span>
+                <div className="p-3 bg-error-container/40 rounded-xl border border-error/20">
+                  <span className="text-xs text-on-error-container font-headline font-semibold block">
+                    Unanswered
+                  </span>
+                  <span className="text-2xl font-headline font-extrabold text-error">
+                    {stats.unanswered}
+                  </span>
                 </div>
               </div>
 
-              <p className="text-xs sm:text-sm text-slate-600 text-center leading-relaxed">
-                You have answered <strong>{stats.answered}</strong> questions and left{' '}
-                <strong>{stats.unanswered}</strong> questions unanswered. Are you sure you want to submit your
-                examination now?
+              <p className="text-xs sm:text-sm text-on-surface-variant text-center leading-relaxed">
+                You have answered <strong className="text-on-surface">{stats.answered}</strong>{' '}
+                questions and left <strong className="text-on-surface">{stats.unanswered}</strong>{' '}
+                questions unanswered. Are you ready to submit your examination?
               </p>
 
-              <div className="bg-amber-50 p-3 rounded-xl border border-amber-200 text-amber-900 text-xs flex items-start gap-2">
-                <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-amber-600" />
+              <div className="bg-tertiary-fixed/50 p-3 rounded-xl border border-tertiary/20 text-on-tertiary-fixed text-xs flex items-start gap-2">
+                <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-tertiary" />
                 <span>
-                  After clicking <strong>Submit Examination</strong>, answers become read-only and cannot be changed.
+                  Once submitted, your response sheet is locked and evaluated immediately.
                 </span>
               </div>
 
               {!isOnline && (
-                <div className="bg-blue-50 p-3 rounded-xl border border-blue-200 text-blue-900 text-xs flex items-start gap-2">
-                  <WifiOff className="w-4 h-4 shrink-0 mt-0.5 text-blue-600" />
+                <div className="bg-primary-fixed/40 p-3 rounded-xl border border-primary/20 text-on-primary-fixed text-xs flex items-start gap-2">
+                  <WifiOff className="w-4 h-4 shrink-0 mt-0.5 text-primary" />
                   <span>
-                    <strong>Offline Practice Submission:</strong> Your result will be calculated locally on this device. When you reconnect to the internet, it will automatically sync to your student profile.
+                    <strong>Offline Practice Submission:</strong> Your scorecard will be calculated
+                    locally on this device and synced automatically when internet resumes.
                   </span>
                 </div>
               )}
@@ -930,18 +1063,18 @@ export const LiveExamScreen: React.FC<LiveExamScreenProps> = ({
                   type="button"
                   onClick={() => setShowSubmitModal(false)}
                   disabled={isSubmitting}
-                  className="flex-1 py-2.5 border border-slate-300 rounded-xl text-xs sm:text-sm font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer"
+                  className="flex-1 py-2.5 rounded-xl bg-surface-container text-on-surface font-headline font-bold text-xs sm:text-sm cursor-pointer"
                 >
-                  Cancel & Review
+                  Cancel &amp; Review
                 </button>
                 <button
                   type="button"
                   onClick={() => handleFinalSubmit(false)}
                   disabled={isSubmitting}
-                  className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs sm:text-sm font-bold shadow-xs cursor-pointer disabled:opacity-60 flex items-center justify-center gap-1.5"
+                  className="flex-1 py-2.5 bg-linear-to-r from-primary to-primary-container text-on-primary rounded-xl font-headline font-bold text-xs sm:text-sm shadow-xs cursor-pointer disabled:opacity-60 flex items-center justify-center gap-1.5"
                 >
                   <Send className="w-4 h-4" />
-                  <span>{isSubmitting ? 'Submitting...' : 'Submit Examination'}</span>
+                  <span>{isSubmitting ? 'Submitting...' : 'Submit Test'}</span>
                 </button>
               </div>
             </div>
@@ -953,26 +1086,29 @@ export const LiveExamScreen: React.FC<LiveExamScreenProps> = ({
           ANTI-CHEATING TAB SWITCH WARNING MODAL
       ========================================================= */}
       {showTabWarning && (
-        <div className="fixed inset-0 z-50 bg-slate-900/80 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl max-w-sm w-full p-6 text-center space-y-4 border border-rose-200 shadow-2xl">
-            <div className="w-12 h-12 rounded-full bg-rose-100 text-rose-600 mx-auto flex items-center justify-center">
+        <div className="fixed inset-0 z-50 bg-on-surface/75 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-surface-container-lowest rounded-2xl max-w-sm w-full p-6 text-center space-y-4 border border-error/30 shadow-2xl">
+            <div className="w-12 h-12 rounded-full bg-error-container text-error mx-auto flex items-center justify-center">
               <ShieldAlert className="w-6 h-6" />
             </div>
             <div>
-              <h3 className="text-base font-bold text-slate-900">Exam Proctoring Warning</h3>
-              <p className="text-xs text-slate-600 mt-1">
-                You navigated away or minimized the examination tab. This event has been recorded in your examination
-                activity log.
+              <h3 className="font-headline text-base font-bold text-on-surface">
+                Exam Proctoring Warning
+              </h3>
+              <p className="text-xs text-on-surface-variant mt-1 leading-relaxed">
+                You navigated away or minimized the examination screen. This event has been recorded
+                in your examination activity log.
               </p>
             </div>
-            <div className="bg-rose-50 text-rose-900 text-xs font-semibold py-2 px-3 rounded-lg border border-rose-200">
-              Total Recorded Tab Switches: {tabSwitchCount}
+            <div className="bg-error-container/40 text-on-error-container text-xs font-headline font-bold py-2 px-3 rounded-lg border border-error/20 tabular-nums">
+              Recorded Tab Switches: {tabSwitchCount}
             </div>
             <button
+              type="button"
               onClick={() => setShowTabWarning(false)}
-              className="w-full py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold cursor-pointer transition-colors"
+              className="w-full py-2.5 bg-primary text-on-primary rounded-xl font-headline font-bold text-xs cursor-pointer transition-opacity hover:opacity-95"
             >
-              I Understand & Return to Exam
+              I Understand &amp; Return to Exam
             </button>
           </div>
         </div>

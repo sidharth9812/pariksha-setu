@@ -4,25 +4,21 @@ import {
   CheckCircle2,
   Clock,
   ArrowLeft,
-  ChevronDown,
-  ChevronUp,
-  FileText,
+  ArrowRight,
   AlertCircle,
   Shield,
   Printer,
   RotateCw,
   Sparkles,
   Lock,
-  XCircle,
-  MinusCircle,
-  Bookmark,
-  ListFilter,
-  ChevronLeft,
-  ChevronRight,
-  Menu,
-  X,
-  LayoutGrid,
+  Calendar,
+  TrendingUp,
+  History,
+  LayoutDashboard,
   WifiOff,
+  CheckCheck,
+  Target,
+  BarChart3,
 } from 'lucide-react';
 import { StudentAttempt, TestItem, QuestionItem } from '../../types/exam';
 import {
@@ -30,33 +26,46 @@ import {
   getQuestionsForTest,
   subscribeToTest,
   getAllStudentAttemptsForTest,
+  getTestAttempts,
 } from '../../services/examService';
-import { CachedImage } from '../../components/common/CachedImage';
-import { syncPendingOfflineAttempts, getDownloadedQuestions } from '../../services/offlineStorageService';
-import { FormattedQuestionText } from '../../utils/questionTextFormatter';
+import {
+  syncPendingOfflineAttempts,
+  getDownloadedQuestions,
+} from '../../services/offlineStorageService';
+import { StudentAnswerKeyView } from './StudentAnswerKeyView';
 
 interface StudentResultViewProps {
   attempt: StudentAttempt;
   onBackToPortal: () => void;
   onReattempt?: (test: TestItem) => void;
+  onOpenAnswerKey?: (attempt: StudentAttempt) => void;
+  initialShowAnswerKey?: boolean;
 }
 
 export const StudentResultView: React.FC<StudentResultViewProps> = ({
   attempt,
   onBackToPortal,
   onReattempt,
+  onOpenAnswerKey,
+  initialShowAnswerKey = false,
 }) => {
   const [test, setTest] = useState<TestItem | null>(null);
   const [questions, setQuestions] = useState<QuestionItem[]>([]);
-  const [activeFilter, setActiveFilter] = useState<'all' | 'correct' | 'incorrect' | 'unattempted' | 'marked'>('all');
-  const [selectedQuestionId, setSelectedQuestionId] = useState<string>('');
-  const [isMobilePaletteOpen, setIsMobilePaletteOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [allAttempts, setAllAttempts] = useState<StudentAttempt[]>([attempt]);
+  const [allTestSubmissions, setAllTestSubmissions] = useState<StudentAttempt[]>([attempt]);
   const [selectedAttemptId, setSelectedAttemptId] = useState<string>(attempt.id);
+  const [showAttemptHistoryPanel, setShowAttemptHistoryPanel] = useState(false);
+  const [showAnswerKeyScreen, setShowAnswerKeyScreen] = useState<boolean>(initialShowAnswerKey);
   const [isSyncing, setIsSyncing] = useState(false);
-  const [isOnline, setIsOnline] = useState(typeof navigator !== 'undefined' ? navigator.onLine : true);
+  const [isOnline, setIsOnline] = useState(
+    typeof navigator !== 'undefined' ? navigator.onLine : true
+  );
+
+  useEffect(() => {
+    setShowAnswerKeyScreen(initialShowAnswerKey);
+  }, [initialShowAnswerKey]);
 
   useEffect(() => {
     const onOn = () => setIsOnline(true);
@@ -89,13 +98,13 @@ export const StudentResultView: React.FC<StudentResultViewProps> = ({
     }
   };
 
-  // Load test data, all student attempts, & questions
   const loadData = async (isManualRefresh = false) => {
     if (isManualRefresh) setIsRefreshing(true);
     try {
-      const [t, atts] = await Promise.all([
+      const [t, atts, testCohortAttempts] = await Promise.all([
         getTestById(attempt.testId),
         getAllStudentAttemptsForTest(attempt.testId, attempt.studentId, attempt.studentName),
+        getTestAttempts(attempt.testId),
       ]);
       setTest(t);
 
@@ -104,6 +113,10 @@ export const StudentResultView: React.FC<StudentResultViewProps> = ({
         if (!atts.some((a) => a.id === selectedAttemptId)) {
           setSelectedAttemptId(atts[atts.length - 1].id);
         }
+      }
+
+      if (testCohortAttempts && testCohortAttempts.length > 0) {
+        setAllTestSubmissions(testCohortAttempts);
       }
 
       const isPublished =
@@ -119,9 +132,6 @@ export const StudentResultView: React.FC<StudentResultViewProps> = ({
           qList = await getDownloadedQuestions(attempt.testId);
         }
         setQuestions(qList);
-        if (qList.length > 0) {
-          setSelectedQuestionId((prev) => prev || qList[0].id);
-        }
       }
     } catch (err) {
       console.error('Failed to load result test data:', err);
@@ -134,7 +144,6 @@ export const StudentResultView: React.FC<StudentResultViewProps> = ({
   useEffect(() => {
     loadData();
 
-    // Subscribe to real-time test updates (when admin clicks "End Exam" or "Publish Results", auto-refresh instantly!)
     const unsubscribe = subscribeToTest(attempt.testId, (updatedTest) => {
       setTest(updatedTest);
       const isPublished =
@@ -146,9 +155,6 @@ export const StudentResultView: React.FC<StudentResultViewProps> = ({
       if (isPublished) {
         getQuestionsForTest(attempt.testId, 'admin').then((qList) => {
           setQuestions(qList);
-          if (qList.length > 0) {
-            setSelectedQuestionId((prev) => prev || qList[0].id);
-          }
         });
       }
     });
@@ -156,74 +162,136 @@ export const StudentResultView: React.FC<StudentResultViewProps> = ({
     return () => unsubscribe();
   }, [attempt.testId]);
 
-  // Current active attempt to inspect
   const currentAttempt = allAttempts.find((a) => a.id === selectedAttemptId) || attempt;
 
-  // Exact rule: Result is published if Admin set instantResult: true OR ended/published exam OR test is released for open practice
   const isResultPublished =
     Boolean(test?.instantResult) ||
     test?.status === 'completed' ||
     test?.status === 'result_published' ||
-    test?.status === 'released';
+    test?.status === 'released' ||
+    Boolean(currentAttempt.isOffline);
 
   const answers = currentAttempt.answers || {};
   const totalQuestions = currentAttempt.totalQuestions || questions.length || 1;
   const attemptedCount = currentAttempt.attemptedCount ?? 0;
   const correctCount = currentAttempt.correctCount ?? 0;
   const incorrectCount = currentAttempt.incorrectCount ?? 0;
-  const unattemptedCount = currentAttempt.unattemptedCount ?? Math.max(0, totalQuestions - attemptedCount);
+  const unattemptedCount =
+    currentAttempt.unattemptedCount ?? Math.max(0, totalQuestions - attemptedCount);
   const posMarks = currentAttempt.positiveMarks ?? (test?.marksPerQuestion ?? 1);
   const negMarks = currentAttempt.negativeMarks ?? (test?.negativeMarks ?? 0.25);
   const maxPossibleMarks = totalQuestions * posMarks;
   const finalScore = currentAttempt.finalScore ?? 0;
+  const negativePenalty = Number((incorrectCount * negMarks).toFixed(2));
   const percentage =
     currentAttempt.percentage ??
     (maxPossibleMarks > 0 ? Number(((finalScore / maxPossibleMarks) * 100).toFixed(1)) : 0);
   const accuracy =
     currentAttempt.accuracy ??
-    (attemptedCount > 0
-      ? Number(((correctCount / attemptedCount) * 100).toFixed(1))
-      : 0);
+    (attemptedCount > 0 ? Number(((correctCount / attemptedCount) * 100).toFixed(1)) : 0);
 
-  const markedForReviewIds = currentAttempt.markedForReviewIds || [];
-  const markedIdsSet = useMemo(() => new Set(markedForReviewIds), [markedForReviewIds]);
-  const markedForReviewCount = markedForReviewIds.length;
+  const passingMarks = useMemo(() => {
+    if (test?.passingMarks && test.passingMarks > 0) return test.passingMarks;
+    return Number((maxPossibleMarks * 0.4).toFixed(1));
+  }, [test?.passingMarks, maxPossibleMarks]);
 
-  // Filtered questions based on activeFilter
-  const filteredQuestions = useMemo(() => {
-    return questions.filter((q) => {
-      const studentAns = answers[q.id];
-      const isAttempted = Boolean(studentAns);
-      const isCorrect = studentAns === q.correctAnswer;
-      const isMarked = markedIdsSet.has(q.id);
+  const isQualified = finalScore >= passingMarks;
 
-      if (activeFilter === 'correct') return isAttempted && isCorrect;
-      if (activeFilter === 'incorrect') return isAttempted && !isCorrect;
-      if (activeFilter === 'unattempted') return !isAttempted;
-      if (activeFilter === 'marked') return isMarked;
-      return true; // 'all'
+  // Real Rank, Percentile, and Cohort Average calculated from allTestSubmissions
+  const rankInfo = useMemo(() => {
+    const pool = [...allTestSubmissions];
+    if (!pool.some((a) => a.id === currentAttempt.id)) {
+      pool.push(currentAttempt);
+    }
+    const sorted = [...pool].sort((a, b) => (b.finalScore ?? 0) - (a.finalScore ?? 0));
+    const totalParticipants = Math.max(1, sorted.length);
+    const rankIdx = sorted.findIndex((a) => a.id === currentAttempt.id);
+    const rank = rankIdx >= 0 ? rankIdx + 1 : 1;
+
+    const belowOrEqualCount = sorted.filter(
+      (a) => (a.finalScore ?? 0) <= (currentAttempt.finalScore ?? 0)
+    ).length;
+    const percentile =
+      totalParticipants > 1
+        ? Number(((belowOrEqualCount / totalParticipants) * 100).toFixed(1))
+        : Number(Math.min(99.9, Math.max(50, percentage)).toFixed(1));
+
+    const sumScores = sorted.reduce((acc, item) => acc + (Number(item.finalScore) || 0), 0);
+    const avgScore =
+      totalParticipants > 0 ? Number((sumScores / totalParticipants).toFixed(1)) : finalScore;
+
+    return {
+      rank,
+      totalParticipants,
+      percentile,
+      avgScore,
+    };
+  }, [allTestSubmissions, currentAttempt, percentage, finalScore]);
+
+  // Sectional / Subject Breakdown computed dynamically from real questions
+  const sectionalBreakdown = useMemo(() => {
+    if (!questions || questions.length === 0) return [];
+    const map = new Map<
+      string,
+      {
+        subject: string;
+        total: number;
+        attempted: number;
+        correct: number;
+        wrong: number;
+        skipped: number;
+        score: number;
+        maxMarks: number;
+      }
+    >();
+
+    questions.forEach((q) => {
+      const subj =
+        (q.subject || test?.subject || test?.examCategory || 'General Studies').trim() ||
+        'General Studies';
+      const entry = map.get(subj) || {
+        subject: subj,
+        total: 0,
+        attempted: 0,
+        correct: 0,
+        wrong: 0,
+        skipped: 0,
+        score: 0,
+        maxMarks: 0,
+      };
+      entry.total += 1;
+      entry.maxMarks = Number((entry.maxMarks + posMarks).toFixed(2));
+      const pick = answers[q.id];
+      if (pick) {
+        entry.attempted += 1;
+        if (pick === q.correctAnswer) {
+          entry.correct += 1;
+          entry.score = Number((entry.score + posMarks).toFixed(2));
+        } else {
+          entry.wrong += 1;
+          entry.score = Number((entry.score - negMarks).toFixed(2));
+        }
+      } else {
+        entry.skipped += 1;
+      }
+      map.set(subj, entry);
     });
-  }, [questions, answers, activeFilter, markedIdsSet]);
 
-  // Current selected question within filteredQuestions
-  const currentQuestion = useMemo(() => {
-    if (filteredQuestions.length === 0) return null;
-    const found = filteredQuestions.find((q) => q.id === selectedQuestionId);
-    return found || filteredQuestions[0];
-  }, [filteredQuestions, selectedQuestionId]);
+    return Array.from(map.values()).map((sec) => {
+      const secAccuracy =
+        sec.attempted > 0 ? Math.round((sec.correct / sec.attempted) * 100) : 0;
+      const pctWidth =
+        sec.maxMarks > 0 ? Math.max(0, Math.min(100, Math.round((sec.score / sec.maxMarks) * 100))) : 0;
+      return {
+        ...sec,
+        accuracy: secAccuracy,
+        pctWidth,
+      };
+    });
+  }, [questions, answers, posMarks, negMarks, test?.subject, test?.examCategory]);
 
-  const currentFilteredIndex = currentQuestion
-    ? filteredQuestions.findIndex((q) => q.id === currentQuestion.id)
-    : -1;
-
-  const actualOverallIndex = currentQuestion
-    ? questions.findIndex((q) => q.id === currentQuestion.id)
-    : -1;
-
-  const displayQNum = currentQuestion?.questionNumber || (actualOverallIndex >= 0 ? actualOverallIndex + 1 : 1);
-
-  // Time metrics if available from attempt timestamps
-  const totalTimeTakenFormatted = useMemo(() => {
+  // Time taken formatted
+  const timeTakenFormatted = useMemo(() => {
     if (currentAttempt.startedAt && currentAttempt.submittedAt) {
       const start = new Date(currentAttempt.startedAt).getTime();
       const end = new Date(currentAttempt.submittedAt).getTime();
@@ -233,131 +301,142 @@ export const StudentResultView: React.FC<StudentResultViewProps> = ({
       if (mins > 0) return `${mins}m ${secs}s`;
       return `${secs}s`;
     }
-    return null;
-  }, [currentAttempt.startedAt, currentAttempt.submittedAt]);
+    return test?.durationMinutes ? `${test.durationMinutes}m` : 'Completed';
+  }, [currentAttempt.startedAt, currentAttempt.submittedAt, test?.durationMinutes]);
 
-  const avgTimePerQuestion = useMemo(() => {
-    if (currentAttempt.startedAt && currentAttempt.submittedAt && totalQuestions > 0) {
-      const start = new Date(currentAttempt.startedAt).getTime();
-      const end = new Date(currentAttempt.submittedAt).getTime();
-      const diffSec = Math.max(0, Math.round((end - start) / 1000));
-      const avg = Math.round(diffSec / totalQuestions);
-      return `${avg} sec`;
-    }
-    return null;
-  }, [currentAttempt.startedAt, currentAttempt.submittedAt, totalQuestions]);
+  const correctPctBar =
+    totalQuestions > 0 ? Math.round((correctCount / totalQuestions) * 100) : 0;
+  const wrongPctBar =
+    totalQuestions > 0 ? Math.round((incorrectCount / totalQuestions) * 100) : 0;
+  const skippedPctBar = Math.max(0, 100 - correctPctBar - wrongPctBar);
 
-  const handlePrint = () => {
-    window.print();
-  };
+  // If the separate Answer Key screen is open, render StudentAnswerKeyView!
+  if (showAnswerKeyScreen && isResultPublished) {
+    return (
+      <StudentAnswerKeyView
+        attempt={currentAttempt}
+        onBackToResultSummary={() => setShowAnswerKeyScreen(false)}
+        onBackToPortal={onBackToPortal}
+      />
+    );
+  }
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-slate-100 flex items-center justify-center p-4">
-        <div className="text-center space-y-3 bg-white p-8 rounded-2xl border border-slate-200 shadow-sm max-w-sm w-full">
-          <div className="w-10 h-10 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin mx-auto" />
-          <h3 className="text-base font-bold text-slate-900">Loading Examination Status</h3>
-          <p className="text-xs text-slate-500">Checking evaluation status from institute server...</p>
+      <div className="min-h-screen bg-surface flex items-center justify-center p-4 font-body text-on-surface">
+        <div className="text-center space-y-3 bg-surface-container-lowest p-8 rounded-2xl border border-outline-variant/20 shadow-xs max-w-sm w-full">
+          <div className="w-10 h-10 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto" />
+          <h3 className="font-headline text-base font-bold text-on-surface">
+            Loading Result Summary
+          </h3>
+          <p className="text-xs text-on-surface-variant">
+            Fetching official scorecard and rank analytics...
+          </p>
         </div>
       </div>
     );
   }
 
-  const handleFilterChange = (filter: 'all' | 'correct' | 'incorrect' | 'unattempted' | 'marked') => {
-    setActiveFilter(filter);
-    const matches = questions.filter((q) => {
-      const studentAns = answers[q.id];
-      const isAttempted = Boolean(studentAns);
-      const isCorrect = studentAns === q.correctAnswer;
-      const isMarked = markedIdsSet.has(q.id);
-
-      if (filter === 'correct') return isAttempted && isCorrect;
-      if (filter === 'incorrect') return isAttempted && !isCorrect;
-      if (filter === 'unattempted') return !isAttempted;
-      if (filter === 'marked') return isMarked;
-      return true;
-    });
-    if (matches.length > 0) {
-      if (!matches.some((q) => q.id === selectedQuestionId)) {
-        setSelectedQuestionId(matches[0].id);
-      }
-    }
-  };
-
-  const handlePrevQuestion = () => {
-    if (currentFilteredIndex > 0) {
-      setSelectedQuestionId(filteredQuestions[currentFilteredIndex - 1].id);
-    }
-  };
-
-  const handleNextQuestion = () => {
-    if (currentFilteredIndex >= 0 && currentFilteredIndex < filteredQuestions.length - 1) {
-      setSelectedQuestionId(filteredQuestions[currentFilteredIndex + 1].id);
-    }
-  };
-
-  const handleSelectQuestion = (qId: string) => {
-    setSelectedQuestionId(qId);
-    setIsMobilePaletteOpen(false);
-  };
-
   return (
-    <div className="min-h-screen bg-slate-100 py-8 px-4 sm:px-6 lg:px-8 print:bg-white print:p-0">
-      <div className="max-w-6xl mx-auto space-y-6">
-        {/* Navigation & Action Bar */}
-        <div className="flex items-center justify-between print:hidden">
-          <button
-            onClick={onBackToPortal}
-            className="inline-flex items-center gap-1.5 text-xs sm:text-sm font-semibold text-slate-700 hover:text-slate-900 bg-white px-3.5 py-2 rounded-xl border border-slate-200 shadow-xs cursor-pointer transition-colors"
-          >
-            <ArrowLeft className="w-4 h-4" />
-            <span>Back to Portal</span>
-          </button>
+    <div className="min-h-screen bg-surface font-body text-on-surface pb-16 antialiased print:bg-white print:p-0">
+      {/* Top App Bar */}
+      <header className="sticky top-0 z-40 bg-surface/90 backdrop-blur-md border-b border-outline-variant/15 print:hidden">
+        <div className="flex items-center justify-between px-4 h-14 max-w-3xl mx-auto">
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={onBackToPortal}
+              aria-label="Back to Dashboard"
+              className="w-9 h-9 rounded-lg flex items-center justify-center text-on-surface hover:bg-surface-container-low active:scale-95 transition-all cursor-pointer"
+            >
+              <ArrowLeft className="w-5 h-5" />
+            </button>
+            <h1 className="font-headline font-bold text-base tracking-tight text-on-surface">
+              Result Summary
+            </h1>
+          </div>
 
           <div className="flex items-center gap-2">
             {test?.status === 'released' && onReattempt && (
               <button
+                type="button"
                 onClick={() => onReattempt(test)}
-                className="inline-flex items-center gap-1.5 text-xs sm:text-sm font-bold text-white bg-linear-to-r from-emerald-600 to-teal-700 hover:from-emerald-700 hover:to-teal-800 px-3.5 py-2 rounded-xl border border-emerald-500 cursor-pointer transition-all shadow-xs"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary-fixed text-on-primary-fixed font-headline font-bold text-xs hover:opacity-90 active:scale-95 transition-all cursor-pointer"
               >
-                <RotateCw className="w-4 h-4" />
-                <span>Reattempt Exam</span>
+                <RotateCw className="w-3.5 h-3.5" />
+                <span>Reattempt</span>
               </button>
             )}
 
             {!isResultPublished && (
               <button
+                type="button"
                 onClick={() => loadData(true)}
                 disabled={isRefreshing}
-                className="inline-flex items-center gap-1.5 text-xs sm:text-sm font-bold text-amber-800 bg-amber-100 hover:bg-amber-200 px-3.5 py-2 rounded-xl border border-amber-300 cursor-pointer transition-colors shadow-xs disabled:opacity-50"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-tertiary-fixed text-on-tertiary-fixed font-headline font-bold text-xs cursor-pointer disabled:opacity-50"
               >
-                <RotateCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin' : ''}`} />
-                <span>{isRefreshing ? 'Checking...' : 'Check Status'}</span>
+                <RotateCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin' : ''}`} />
+                <span>{isRefreshing ? 'Checking...' : 'Refresh'}</span>
               </button>
             )}
 
             {isResultPublished && (
               <button
-                onClick={handlePrint}
-                className="inline-flex items-center gap-1.5 text-xs sm:text-sm font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 px-3.5 py-2 rounded-xl border border-indigo-200 cursor-pointer transition-colors shadow-xs"
+                type="button"
+                onClick={() => window.print()}
+                aria-label="Print Scorecard"
+                className="w-9 h-9 rounded-lg flex items-center justify-center text-primary hover:bg-surface-container-low active:scale-95 transition-all cursor-pointer"
+                title="Print / Save Scorecard PDF"
               >
                 <Printer className="w-4 h-4" />
-                <span>Print Scorecard</span>
               </button>
             )}
           </div>
         </div>
+      </header>
 
-        {/* Attempt History Switcher (When student has multiple attempts or for released tests) */}
-        {(allAttempts.length > 1 || test?.status === 'released') && (
-          <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs space-y-3 print:hidden">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
-              <span className="text-xs font-bold text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
-                <Award className="w-4 h-4 text-indigo-600" />
-                <span>All Attempts History ({allAttempts.length} Total)</span>
+      <main className="max-w-3xl mx-auto px-4 pt-4 space-y-5">
+        {/* Offline Attempt Sync Banner */}
+        {currentAttempt.isOffline && !currentAttempt.synced && (
+          <div className="bg-tertiary-fixed/50 border border-tertiary/20 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 print:hidden">
+            <div className="flex items-start gap-3">
+              <div className="p-2 bg-tertiary-fixed text-tertiary rounded-lg shrink-0">
+                <WifiOff className="w-4 h-4" />
+              </div>
+              <div>
+                <h4 className="font-headline text-xs sm:text-sm font-bold text-on-tertiary-fixed">
+                  Offline Practice Result • Saved Locally
+                </h4>
+                <p className="text-[11px] text-on-surface-variant leading-relaxed mt-0.5">
+                  Completed offline. Your scorecard and answer key are stored on this device.
+                  {isOnline
+                    ? ' Tap Sync to upload to your cloud profile.'
+                    : ' Connect to the internet to sync.'}
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={handleSyncAttempt}
+              disabled={isSyncing || !isOnline}
+              className="px-3.5 py-2 bg-tertiary text-on-tertiary rounded-lg text-xs font-headline font-bold shrink-0 flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+            >
+              <RotateCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
+              <span>{isSyncing ? 'Syncing...' : isOnline ? 'Sync Now' : 'Offline'}</span>
+            </button>
+          </div>
+        )}
+
+        {/* Attempt Switcher Panel (shown when multiple attempts exist or toggled) */}
+        {(allAttempts.length > 1 || showAttemptHistoryPanel) && (
+          <div className="bg-surface-container-lowest p-4 rounded-xl border border-outline-variant/20 shadow-2xs space-y-3 print:hidden">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-headline font-bold text-on-surface uppercase tracking-wider flex items-center gap-1.5">
+                <History className="w-4 h-4 text-primary" />
+                <span>Attempt History ({allAttempts.length})</span>
               </span>
-              <span className="text-[11px] text-slate-500">
-                Switch attempt to view scorecard & questions review anytime
+              <span className="text-[11px] text-on-surface-variant">
+                Select any attempt to inspect its result
               </span>
             </div>
 
@@ -368,17 +447,20 @@ export const StudentResultView: React.FC<StudentResultViewProps> = ({
                 return (
                   <button
                     key={att.id}
+                    type="button"
                     onClick={() => setSelectedAttemptId(att.id)}
-                    className={`px-3 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 ${
+                    className={`px-3 py-2 rounded-lg text-xs font-headline font-bold transition-all cursor-pointer flex items-center gap-2 ${
                       isSelected
-                        ? 'bg-indigo-600 text-white shadow-sm ring-2 ring-indigo-300'
-                        : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200'
+                        ? 'bg-primary text-on-primary shadow-xs'
+                        : 'bg-surface-container-low hover:bg-surface-container text-on-surface border border-outline-variant/20'
                     }`}
                   >
                     <span>Attempt #{att.attemptNumber || idx + 1}</span>
                     <span
-                      className={`text-[10px] px-1.5 py-0.5 rounded font-mono font-bold ${
-                        isSelected ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-800'
+                      className={`text-[10px] px-1.5 py-0.5 rounded tabular-nums ${
+                        isSelected
+                          ? 'bg-white/20 text-white'
+                          : 'bg-surface-container-highest text-on-surface'
                       }`}
                     >
                       {att.finalScore} Marks ({att.percentage}%)
@@ -386,7 +468,9 @@ export const StudentResultView: React.FC<StudentResultViewProps> = ({
                     {isLatest && (
                       <span
                         className={`text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded ${
-                          isSelected ? 'bg-emerald-400 text-slate-900' : 'bg-emerald-100 text-emerald-800'
+                          isSelected
+                            ? 'bg-primary-fixed text-on-primary-fixed'
+                            : 'bg-emerald-100 text-emerald-800'
                         }`}
                       >
                         Latest
@@ -399,1023 +483,559 @@ export const StudentResultView: React.FC<StudentResultViewProps> = ({
           </div>
         )}
 
-        {/* Offline Attempt Status Banner */}
-        {currentAttempt.isOffline && !currentAttempt.synced && (
-          <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs print:hidden">
-            <div className="flex items-start sm:items-center gap-3">
-              <div className="p-2.5 bg-amber-100 text-amber-700 rounded-xl shrink-0">
-                <WifiOff className="w-5 h-5" />
-              </div>
-              <div>
-                <h4 className="text-xs sm:text-sm font-bold text-amber-900">
-                  Offline Practice Result • Saved Locally
-                </h4>
-                <p className="text-[11px] text-amber-700 leading-relaxed">
-                  This practice paper was completed offline. Your scorecard and complete explanations are saved safely on this device.
-                  {isOnline
-                    ? ' Reconnect to your institute account by clicking Sync Now.'
-                    : ' Connect to the internet to sync with your institute account.'}
-                </p>
-              </div>
-            </div>
-            <button
-              onClick={handleSyncAttempt}
-              disabled={isSyncing || !isOnline}
-              className="px-4 py-2 bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white rounded-xl text-xs font-bold shrink-0 flex items-center justify-center gap-1.5 cursor-pointer shadow-xs transition-colors"
-            >
-              <RotateCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
-              <span>{isSyncing ? 'Syncing...' : isOnline ? 'Sync to Server' : 'Offline'}</span>
-            </button>
-          </div>
-        )}
-
-        {currentAttempt.isOffline && currentAttempt.synced && (
-          <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-3.5 flex items-center gap-2.5 text-xs text-emerald-800 font-semibold shadow-xs print:hidden">
-            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-            <span>Offline practice attempt successfully synchronized with your cloud profile.</span>
-          </div>
-        )}
-
-        {/* -------------------------------------------------------------
-            CASE 1: AWAITING RESULT (When admin has NOT ended exam yet & instantResult is OFF)
-            ------------------------------------------------------------- */}
+        {/* CASE 1: AWAITING ADMIN RESULT PUBLICATION */}
         {!isResultPublished ? (
-          <div className="space-y-6">
-            {/* Status Card */}
-            <div className="bg-white rounded-3xl p-6 sm:p-10 shadow-sm border border-amber-200/90 text-center space-y-4">
-              <div className="w-20 h-20 rounded-full bg-amber-100 text-amber-600 mx-auto flex items-center justify-center shadow-inner relative">
-                <Clock className="w-10 h-10 animate-pulse" />
-                <span className="absolute -bottom-1 -right-1 p-1 bg-amber-500 rounded-full text-white">
-                  <Lock className="w-3.5 h-3.5" />
+          <div className="space-y-5">
+            <div className="bg-surface-container-lowest rounded-2xl p-6 sm:p-8 shadow-xs border border-outline-variant/20 text-center space-y-4">
+              <div className="w-16 h-16 rounded-full bg-tertiary-fixed text-tertiary mx-auto flex items-center justify-center relative">
+                <Clock className="w-8 h-8 animate-pulse" />
+                <span className="absolute -bottom-1 -right-1 p-1 bg-tertiary rounded-full text-on-tertiary">
+                  <Lock className="w-3 h-3" />
                 </span>
               </div>
 
               <div className="space-y-1">
-                <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-black uppercase tracking-wider bg-amber-100 text-amber-800 border border-amber-300">
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-headline font-bold uppercase tracking-wider bg-tertiary-fixed text-on-tertiary-fixed">
                   <Clock className="w-3.5 h-3.5" />
                   <span>Result Awaited</span>
                 </span>
-                <h1 className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight pt-2">
-                  Examination Submitted Successfully
-                </h1>
-                <p className="text-sm font-semibold text-slate-600">
-                  Your responses have been recorded securely.
+                <h2 className="font-headline text-xl sm:text-2xl font-extrabold text-on-surface pt-1">
+                  Test Submitted Successfully
+                </h2>
+                <p className="text-xs sm:text-sm text-on-surface-variant">
+                  Your response sheet has been recorded securely on the examination server.
                 </p>
               </div>
 
-              {/* Informative Notice Box */}
-              <div className="bg-amber-50/80 border border-amber-200 rounded-2xl p-4 sm:p-5 text-left space-y-2 max-w-xl mx-auto">
+              <div className="bg-surface-container-low rounded-xl p-4 text-left space-y-1.5 max-w-lg mx-auto border border-outline-variant/20">
                 <div className="flex items-start gap-2.5">
-                  <AlertCircle className="w-5 h-5 text-amber-700 shrink-0 mt-0.5" />
-                  <div className="space-y-1 text-xs text-amber-900 leading-relaxed">
-                    <p className="font-bold text-amber-950 text-sm">
-                      Result Publication Notice:
+                  <AlertCircle className="w-4 h-4 text-tertiary shrink-0 mt-0.5" />
+                  <div className="text-xs text-on-surface-variant leading-relaxed">
+                    <p className="font-headline font-bold text-on-surface">
+                      Official Result Publication Notice
                     </p>
-                    <p>
-                      Your exam response sheet has been recorded successfully. Once the exam administrator ends the session, your official scorecard and solutions will be published.
-                    </p>
-                    <p className="text-[11px] text-amber-800 pt-1">
-                      (As per examination guidelines, results are withheld while the session is underway and will unlock automatically once the administrator ends the exam.)
+                    <p className="mt-0.5">
+                      Once the administrator concludes this live examination session, your scorecard, rank, and detailed answer key will unlock automatically on this screen.
                     </p>
                   </div>
                 </div>
               </div>
-
-              {/* Real-time sync badge */}
-              <div className="inline-flex items-center gap-2 text-xs font-semibold text-emerald-700 bg-emerald-50 px-3.5 py-1.5 rounded-full border border-emerald-200">
-                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
-                <span>Real-time Live Sync: Score will reveal automatically when exam ends</span>
-              </div>
             </div>
 
-            {/* Official Submission Slip */}
-            <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-200 space-y-4">
-              <div className="flex items-center justify-between border-b border-slate-200 pb-3">
+            {/* Candidate Submission Slip */}
+            <div className="bg-surface-container-lowest rounded-xl p-5 shadow-xs border border-outline-variant/15 space-y-4">
+              <div className="flex items-center justify-between border-b border-outline-variant/15 pb-3">
                 <div className="flex items-center gap-2">
-                  <Shield className="w-5 h-5 text-indigo-600" />
-                  <h3 className="font-bold text-sm sm:text-base text-slate-900">
+                  <Shield className="w-4 h-4 text-primary" />
+                  <h3 className="font-headline font-bold text-sm text-on-surface">
                     Candidate Submission Slip
                   </h3>
                 </div>
-                <span className="text-[11px] font-bold px-2 py-0.5 rounded bg-slate-100 text-slate-600">
+                <span className="text-[10px] font-headline font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-primary-fixed text-on-primary-fixed">
                   Receipt Verified
                 </span>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
-                <div className="p-3 rounded-xl bg-slate-50 border border-slate-200/80 space-y-1">
-                  <span className="text-slate-400 block uppercase tracking-wider text-[10px] font-bold">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                <div className="p-3 rounded-lg bg-surface-container-low">
+                  <span className="text-on-surface-variant block uppercase tracking-wider text-[10px] font-bold">
                     Candidate Name
                   </span>
-                  <span className="font-bold text-slate-900 text-sm">{attempt.studentName}</span>
-                </div>
-
-                <div className="p-3 rounded-xl bg-slate-50 border border-slate-200/80 space-y-1">
-                  <span className="text-slate-400 block uppercase tracking-wider text-[10px] font-bold">
-                    Candidate ID
+                  <span className="font-headline font-bold text-on-surface text-sm mt-0.5 block">
+                    {currentAttempt.studentName}
                   </span>
-                  <span className="font-mono font-bold text-slate-900 text-sm">{attempt.studentId}</span>
                 </div>
-
-                <div className="p-3 rounded-xl bg-slate-50 border border-slate-200/80 space-y-1">
-                  <span className="text-slate-400 block uppercase tracking-wider text-[10px] font-bold">
+                <div className="p-3 rounded-lg bg-surface-container-low">
+                  <span className="text-on-surface-variant block uppercase tracking-wider text-[10px] font-bold">
                     Exam Paper
                   </span>
-                  <span className="font-bold text-slate-900 text-sm">{attempt.testTitle}</span>
-                </div>
-
-                <div className="p-3 rounded-xl bg-slate-50 border border-slate-200/80 space-y-1">
-                  <span className="text-slate-400 block uppercase tracking-wider text-[10px] font-bold">
-                    Submission Time
-                  </span>
-                  <span className="font-semibold text-slate-800 text-sm">
-                    {attempt.submittedAt ? new Date(attempt.submittedAt).toLocaleString() : 'Recorded'}
+                  <span className="font-headline font-bold text-on-surface text-sm mt-0.5 block">
+                    {currentAttempt.testTitle}
                   </span>
                 </div>
-
-                <div className="p-3 rounded-xl bg-slate-50 border border-slate-200/80 space-y-1">
-                  <span className="text-slate-400 block uppercase tracking-wider text-[10px] font-bold">
+                <div className="p-3 rounded-lg bg-surface-container-low">
+                  <span className="text-on-surface-variant block uppercase tracking-wider text-[10px] font-bold">
                     Attempted Questions
                   </span>
-                  <span className="font-bold text-slate-900 text-sm">
-                    {attempt.attemptedCount} / {totalQuestions} Questions
+                  <span className="font-headline font-bold text-on-surface text-sm mt-0.5 block tabular-nums">
+                    {currentAttempt.attemptedCount} / {totalQuestions}
                   </span>
                 </div>
-
-                <div className="p-3 rounded-xl bg-slate-50 border border-slate-200/80 space-y-1">
-                  <span className="text-slate-400 block uppercase tracking-wider text-[10px] font-bold">
-                    Status
+                <div className="p-3 rounded-lg bg-surface-container-low">
+                  <span className="text-on-surface-variant block uppercase tracking-wider text-[10px] font-bold">
+                    Submitted At
                   </span>
-                  <span className="font-bold text-amber-700 text-sm flex items-center gap-1.5">
-                    <Clock className="w-3.5 h-3.5" />
-                    <span>Awaiting Admin End Exam Trigger</span>
+                  <span className="font-headline font-bold text-on-surface text-sm mt-0.5 block tabular-nums">
+                    {currentAttempt.submittedAt
+                      ? new Date(currentAttempt.submittedAt).toLocaleString()
+                      : 'Recorded'}
                   </span>
                 </div>
               </div>
             </div>
           </div>
         ) : (
-          /* -------------------------------------------------------------
-             CASE 2: RESULT PUBLISHED (Admin ended exam OR instantResult is true)
-             ------------------------------------------------------------- */
-          <div className="space-y-6">
-            {/* Status Confirmation Banner */}
-            <div className="bg-white rounded-2xl p-6 sm:p-8 shadow-sm border border-slate-200 text-center space-y-3">
-              <div className="w-16 h-16 rounded-full bg-emerald-100 text-emerald-600 mx-auto flex items-center justify-center shadow-xs">
-                <CheckCircle2 className="w-9 h-9" />
-              </div>
-              <h1 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">
-                Examination Scorecard & Result
-              </h1>
-              <p className="text-xs sm:text-sm text-slate-700 max-w-md mx-auto">
-                Candidate: <strong className="text-slate-900">{currentAttempt.studentName}</strong> &bull; Paper:{' '}
-                <strong className="text-slate-900">{currentAttempt.testTitle}</strong>
-              </p>
-              <div className="flex flex-wrap items-center justify-center gap-2 text-[11px] text-slate-500 pt-1">
-                <span>
-                  Submission: {currentAttempt.submittedAt ? new Date(currentAttempt.submittedAt).toLocaleString() : 'Recorded'}
+          /* CASE 2: RESULT PUBLISHED — ASPIRANT NEO RESULT SUMMARY SCREEN */
+          <>
+            {/* Test Metadata & Status Header */}
+            <section className="space-y-1.5">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-md bg-primary-fixed text-on-primary-fixed font-headline font-bold text-[11px] uppercase tracking-wider">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-primary" />
+                  <span>Test Submitted Successfully</span>
                 </span>
-                <span>&bull;</span>
-                <span className="px-2 py-0.5 rounded font-mono font-bold bg-slate-100 text-slate-800">
-                  Attempt #{currentAttempt.attemptNumber || 1}
+                <span className="text-xs font-medium text-on-surface-variant">
+                  &bull; Attempt #{currentAttempt.attemptNumber || 1}
                 </span>
-                <span>&bull;</span>
-                <span className="px-2.5 py-0.5 rounded-full font-bold bg-emerald-100 text-emerald-800">
-                  {test?.instantResult ? 'Instant Result Published' : 'Exam Ended by Admin - Result Published'}
+                <span className="text-xs font-medium text-on-surface-variant">
+                  &bull; Candidate: <strong className="text-on-surface">{currentAttempt.studentName}</strong>
                 </span>
               </div>
-            </div>
 
-            {/* Scorecard Hero Banner */}
-            <div className="bg-linear-to-br from-indigo-800 via-indigo-900 to-slate-900 rounded-2xl p-6 sm:p-8 text-white shadow-lg space-y-6">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-white/10 pb-6">
-                <div>
-                  <span className="text-xs font-semibold tracking-wider uppercase text-indigo-300 block">
-                    Candidate Scorecard & Rank Evaluation &bull; Attempt #{currentAttempt.attemptNumber || 1}
+              <h2 className="font-headline font-extrabold text-xl sm:text-2xl text-on-surface tracking-tight leading-snug">
+                {currentAttempt.testTitle || test?.title}
+              </h2>
+
+              <div className="flex flex-wrap items-center gap-4 text-xs text-on-surface-variant pt-0.5">
+                <span className="flex items-center gap-1 tabular-nums">
+                  <Calendar className="w-3.5 h-3.5 text-outline" />
+                  <span>
+                    {currentAttempt.submittedAt
+                      ? new Date(currentAttempt.submittedAt).toLocaleDateString('en-IN', {
+                          day: '2-digit',
+                          month: 'short',
+                          year: 'numeric',
+                        })
+                      : 'Recent'}
                   </span>
-                  <h2 className="text-2xl font-black mt-0.5">{currentAttempt.testTitle}</h2>
-                  <div className="text-xs text-indigo-200 mt-1">
-                    Candidate ID: <span className="font-mono">{currentAttempt.studentId}</span>
-                  </div>
-                </div>
-                <div className="text-left sm:text-right bg-white/10 sm:bg-transparent p-4 sm:p-0 rounded-xl sm:rounded-none">
-                  <span className="text-xs text-indigo-200 block uppercase font-bold tracking-wider">
-                    Total Score
+                </span>
+                <span className="flex items-center gap-1 tabular-nums">
+                  <Clock className="w-3.5 h-3.5 text-outline" />
+                  <span>
+                    {timeTakenFormatted}
+                    {test?.durationMinutes ? ` / ${test.durationMinutes}m` : ''}
                   </span>
-                  <span className="text-4xl font-black text-amber-300">{finalScore}</span>
-                  <span className="text-xs text-indigo-200 block mt-0.5">
-                    / {maxPossibleMarks} Maximum Marks
-                  </span>
-                </div>
+                </span>
               </div>
+            </section>
 
-              {/* Metrics Grid */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-center">
-                <div className="bg-white/10 backdrop-blur-xs p-3.5 rounded-xl border border-white/10">
-                  <span className="text-[11px] uppercase tracking-wider text-indigo-200 block">Percentage</span>
-                  <span className="text-xl sm:text-2xl font-black">{percentage}%</span>
-                </div>
-
-                <div className="bg-white/10 backdrop-blur-xs p-3.5 rounded-xl border border-white/10">
-                  <span className="text-[11px] uppercase tracking-wider text-indigo-200 block">Accuracy</span>
-                  <span className="text-xl sm:text-2xl font-black">{accuracy}%</span>
-                </div>
-
-                <div className="bg-white/10 backdrop-blur-xs p-3.5 rounded-xl border border-white/10">
-                  <span className="text-[11px] uppercase tracking-wider text-emerald-300 block">
-                    Correct (+{posMarks})
-                  </span>
-                  <span className="text-xl sm:text-2xl font-black text-emerald-300">{currentAttempt.correctCount}</span>
-                </div>
-
-                <div className="bg-white/10 backdrop-blur-xs p-3.5 rounded-xl border border-white/10">
-                  <span className="text-[11px] uppercase tracking-wider text-rose-300 block">
-                    Wrong (-{negMarks})
-                  </span>
-                  <span className="text-xl sm:text-2xl font-black text-rose-300">{currentAttempt.incorrectCount}</span>
-                </div>
-              </div>
-
-              {/* Breakdown summary bar */}
-              <div className="pt-2 border-t border-white/10 flex flex-wrap items-center justify-between text-xs text-indigo-200">
-                <div>
-                  Total Questions: <strong>{totalQuestions}</strong>
-                </div>
-                <div>
-                  Attempted: <strong>{currentAttempt.attemptedCount}</strong>
-                </div>
-                <div>
-                  Unattempted: <strong>{currentAttempt.unattemptedCount}</strong>
-                </div>
-                {currentAttempt.tabSwitchCount && currentAttempt.tabSwitchCount > 0 ? (
-                  <div className="text-amber-300">
-                    Tab Switches Detected: <strong>{currentAttempt.tabSwitchCount}</strong>
-                  </div>
-                ) : null}
-              </div>
-            </div>
-
-            {/* Testbook-style Answer Key / Review Interface */}
-            {questions.length > 0 ? (
-              <div className="space-y-4">
-                {/* Compact Result Overview Bar */}
-                <div className="bg-white rounded-2xl p-4 sm:p-5 shadow-xs border border-slate-200">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
-                    <div className="flex items-center gap-2">
-                      <div className="w-8 h-8 rounded-xl bg-indigo-50 border border-indigo-100 text-indigo-600 flex items-center justify-center">
-                        <FileText className="w-4 h-4" />
-                      </div>
-                      <div>
-                        <h3 className="font-extrabold text-sm sm:text-base text-slate-900 leading-tight">
-                          Solutions & Answer Review
-                        </h3>
-                        <p className="text-[11px] text-slate-500">
-                          Detailed answer analysis with official keys and full explanations
-                        </p>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2 self-start sm:self-auto">
-                      <span className="text-[11px] font-bold text-slate-600 bg-slate-100 px-2.5 py-1 rounded-lg">
-                        Score: <span className="text-indigo-600 font-extrabold">{finalScore}</span>/{maxPossibleMarks}
-                      </span>
-                      <span className="text-[11px] font-bold text-slate-600 bg-slate-100 px-2.5 py-1 rounded-lg">
-                        Accuracy: <span className="text-emerald-600 font-extrabold">{accuracy}%</span>
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Summary metric chips */}
-                  <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 pt-3">
-                    <div className="bg-slate-50 border border-slate-200/80 rounded-xl p-2.5 text-center">
-                      <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 block">Total</span>
-                      <span className="text-base font-black text-slate-800">{totalQuestions}</span>
-                    </div>
-                    <div className="bg-blue-50/70 border border-blue-200/80 rounded-xl p-2.5 text-center">
-                      <span className="text-[10px] font-bold uppercase tracking-wider text-blue-700 block">Attempted</span>
-                      <span className="text-base font-black text-blue-800">{attemptedCount}</span>
-                    </div>
-                    <div className="bg-emerald-50/70 border border-emerald-200/80 rounded-xl p-2.5 text-center">
-                      <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-700 block">Correct (+{posMarks})</span>
-                      <span className="text-base font-black text-emerald-700">{correctCount}</span>
-                    </div>
-                    <div className="bg-rose-50/70 border border-rose-200/80 rounded-xl p-2.5 text-center">
-                      <span className="text-[10px] font-bold uppercase tracking-wider text-rose-700 block">Incorrect (-{negMarks})</span>
-                      <span className="text-base font-black text-rose-700">{incorrectCount}</span>
-                    </div>
-                    <div className="bg-amber-50/70 border border-amber-200/80 rounded-xl p-2.5 text-center col-span-2 sm:col-span-1">
-                      <span className="text-[10px] font-bold uppercase tracking-wider text-amber-700 block">Unattempted</span>
-                      <span className="text-base font-black text-amber-800">{unattemptedCount}</span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Filter Bar (Testbook Style Tabs) */}
-                <div className="bg-white rounded-2xl p-2 shadow-xs border border-slate-200">
-                  <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar scroll-smooth">
-                    <button
-                      type="button"
-                      onClick={() => handleFilterChange('all')}
-                      className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap flex items-center gap-1.5 shrink-0 cursor-pointer ${
-                        activeFilter === 'all'
-                          ? 'bg-indigo-600 text-white shadow-xs'
-                          : 'bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200/80'
-                      }`}
-                    >
-                      <ListFilter className="w-3.5 h-3.5" />
-                      <span>All Questions</span>
-                      <span
-                        className={`text-[10px] font-extrabold px-1.5 py-0.5 rounded-full ${
-                          activeFilter === 'all' ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-700'
-                        }`}
-                      >
-                        {totalQuestions}
-                      </span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => handleFilterChange('correct')}
-                      className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap flex items-center gap-1.5 shrink-0 cursor-pointer ${
-                        activeFilter === 'correct'
-                          ? 'bg-emerald-600 text-white shadow-xs'
-                          : 'bg-emerald-50/60 hover:bg-emerald-100/70 text-emerald-800 border border-emerald-200/70'
-                      }`}
-                    >
-                      <CheckCircle2 className="w-3.5 h-3.5" />
-                      <span>Correct</span>
-                      <span
-                        className={`text-[10px] font-extrabold px-1.5 py-0.5 rounded-full ${
-                          activeFilter === 'correct' ? 'bg-white/20 text-white' : 'bg-emerald-200/70 text-emerald-900'
-                        }`}
-                      >
-                        {correctCount}
-                      </span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => handleFilterChange('incorrect')}
-                      className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap flex items-center gap-1.5 shrink-0 cursor-pointer ${
-                        activeFilter === 'incorrect'
-                          ? 'bg-rose-600 text-white shadow-xs'
-                          : 'bg-rose-50/60 hover:bg-rose-100/70 text-rose-800 border border-rose-200/70'
-                      }`}
-                    >
-                      <XCircle className="w-3.5 h-3.5" />
-                      <span>Incorrect</span>
-                      <span
-                        className={`text-[10px] font-extrabold px-1.5 py-0.5 rounded-full ${
-                          activeFilter === 'incorrect' ? 'bg-white/20 text-white' : 'bg-rose-200/70 text-rose-900'
-                        }`}
-                      >
-                        {incorrectCount}
-                      </span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => handleFilterChange('unattempted')}
-                      className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap flex items-center gap-1.5 shrink-0 cursor-pointer ${
-                        activeFilter === 'unattempted'
-                          ? 'bg-slate-800 text-white shadow-xs'
-                          : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200'
-                      }`}
-                    >
-                      <MinusCircle className="w-3.5 h-3.5" />
-                      <span>Unattempted</span>
-                      <span
-                        className={`text-[10px] font-extrabold px-1.5 py-0.5 rounded-full ${
-                          activeFilter === 'unattempted' ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-700'
-                        }`}
-                      >
-                        {unattemptedCount}
-                      </span>
-                    </button>
-
-                    {markedForReviewCount > 0 && (
-                      <button
-                        type="button"
-                        onClick={() => handleFilterChange('marked')}
-                        className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap flex items-center gap-1.5 shrink-0 cursor-pointer ${
-                          activeFilter === 'marked'
-                            ? 'bg-purple-600 text-white shadow-xs'
-                            : 'bg-purple-50 hover:bg-purple-100 text-purple-800 border border-purple-200'
-                        }`}
-                      >
-                        <Bookmark className="w-3.5 h-3.5" />
-                        <span>Marked for Review</span>
-                        <span
-                          className={`text-[10px] font-extrabold px-1.5 py-0.5 rounded-full ${
-                            activeFilter === 'marked' ? 'bg-white/20 text-white' : 'bg-purple-200 text-purple-900'
-                          }`}
-                        >
-                          {markedForReviewCount}
-                        </span>
-                      </button>
-                    )}
-                  </div>
-                </div>
-
-                {/* Filtered Empty State */}
-                {filteredQuestions.length === 0 ? (
-                  <div className="bg-white rounded-2xl p-8 border border-slate-200 text-center space-y-2">
-                    <AlertCircle className="w-8 h-8 text-slate-400 mx-auto" />
-                    <h4 className="font-bold text-slate-800 text-sm">No Questions Found</h4>
-                    <p className="text-xs text-slate-500">
-                      There are no questions in the "{activeFilter}" category for this attempt.
+            {/* Hero Score Card */}
+            <section className="bg-surface-container-lowest rounded-xl p-5 shadow-xs border border-outline-variant/15 relative overflow-hidden">
+              <div className="absolute -right-8 -top-8 w-32 h-32 rounded-full bg-primary-fixed/40 blur-2xl pointer-events-none" />
+              <div className="relative z-10 flex flex-col gap-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-xs font-headline font-bold uppercase tracking-wider text-on-surface-variant">
+                      Overall Score
                     </p>
-                    <button
-                      type="button"
-                      onClick={() => handleFilterChange('all')}
-                      className="inline-flex items-center gap-1.5 text-xs font-bold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 px-3.5 py-2 rounded-xl border border-indigo-200 cursor-pointer mt-2"
+                    <div className="flex items-baseline gap-1.5 mt-1 tabular-nums">
+                      <span className="font-headline font-extrabold text-4xl text-primary tracking-tight">
+                        {finalScore}
+                      </span>
+                      <span className="font-headline font-semibold text-base text-outline">
+                        / {maxPossibleMarks}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Qualification Status Pill */}
+                  <div
+                    className={`flex flex-col items-end px-3 py-1.5 rounded-lg border ${
+                      isQualified
+                        ? 'bg-emerald-50 border-emerald-200/60'
+                        : 'bg-tertiary-fixed/60 border-tertiary/20'
+                    }`}
+                  >
+                    <div className="flex items-center gap-1">
+                      <Award
+                        className={`w-4 h-4 ${
+                          isQualified ? 'text-emerald-700' : 'text-tertiary'
+                        }`}
+                      />
+                      <span
+                        className={`font-headline font-bold text-xs ${
+                          isQualified ? 'text-emerald-800' : 'text-on-tertiary-fixed'
+                        }`}
+                      >
+                        {isQualified ? 'Qualified Cutoff' : 'Below Cutoff'}
+                      </span>
+                    </div>
+                    <span
+                      className={`text-[10px] font-medium tabular-nums ${
+                        isQualified ? 'text-emerald-600' : 'text-tertiary'
+                      }`}
                     >
-                      View All Questions
-                    </button>
+                      Passing Marks: {passingMarks}
+                    </span>
                   </div>
-                ) : currentQuestion ? (
-                  /* Responsive 2-Column Interface: Single Question on Left, Fixed Palette on Right */
-                  <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-                    {/* Main Area: One Question At A Time */}
-                    <div className="lg:col-span-8 space-y-4">
-                      {(() => {
-                        const studentAns = answers[currentQuestion.id];
-                        const isCorrect = studentAns === currentQuestion.correctAnswer;
-                        const isAttempted = Boolean(studentAns);
-                        const isMarked = markedIdsSet.has(currentQuestion.id);
+                </div>
 
-                        let statusBadge = (
-                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-slate-100 text-slate-700 border border-slate-200">
-                            <MinusCircle className="w-3.5 h-3.5 text-slate-500" />
-                            <span>Unattempted (0 Marks)</span>
-                          </span>
-                        );
-                        let cardBorderClass = 'border-slate-200';
-
-                        if (isAttempted && isCorrect) {
-                          statusBadge = (
-                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-50 text-emerald-800 border border-emerald-200">
-                              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                              <span>Correct (+{posMarks} Marks)</span>
-                            </span>
-                          );
-                          cardBorderClass = 'border-emerald-200 ring-1 ring-emerald-100';
-                        } else if (isAttempted && !isCorrect) {
-                          statusBadge = (
-                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-rose-50 text-rose-800 border border-rose-200">
-                              <XCircle className="w-3.5 h-3.5 text-rose-600" />
-                              <span>Incorrect (-{negMarks} Marks)</span>
-                            </span>
-                          );
-                          cardBorderClass = 'border-rose-200 ring-1 ring-rose-100';
-                        }
-
-                        return (
-                          <div className={`bg-white rounded-2xl shadow-xs border ${cardBorderClass} overflow-hidden transition-all`}>
-                            {/* Card Header with Question Counter */}
-                            <div className="px-5 py-3.5 bg-slate-50/80 border-b border-slate-100 flex flex-wrap items-center justify-between gap-2">
-                              <div className="flex items-center gap-2 flex-wrap">
-                                <span className="px-3 py-1 rounded-xl font-black text-xs sm:text-sm bg-slate-900 text-white shadow-xs flex items-center gap-1.5">
-                                  <span>Question {displayQNum}</span>
-                                  <span className="text-slate-400 font-semibold text-xs">of {totalQuestions}</span>
-                                </span>
-
-                                {activeFilter !== 'all' && (
-                                  <span className="text-[11px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded-md">
-                                    {currentFilteredIndex + 1} of {filteredQuestions.length} ({activeFilter})
-                                  </span>
-                                )}
-
-                                {currentQuestion.subject && (
-                                  <span className="text-[11px] font-bold text-slate-600 bg-white border border-slate-200 px-2 py-0.5 rounded-md">
-                                    {currentQuestion.subject}
-                                  </span>
-                                )}
-
-                                {isMarked && (
-                                  <span className="inline-flex items-center gap-1 text-[10px] font-extrabold text-purple-700 bg-purple-100 px-2 py-0.5 rounded-full border border-purple-200">
-                                    <Bookmark className="w-3 h-3" />
-                                    Marked for Review
-                                  </span>
-                                )}
-                              </div>
-
-                              <div className="flex items-center gap-2">
-                                {/* Mobile question navigator toggle button */}
-                                <button
-                                  type="button"
-                                  onClick={() => setIsMobilePaletteOpen(true)}
-                                  className="lg:hidden inline-flex items-center gap-1.5 text-xs font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 px-2.5 py-1 rounded-xl cursor-pointer transition-colors"
-                                >
-                                  <LayoutGrid className="w-3.5 h-3.5" />
-                                  <span>Questions</span>
-                                </button>
-
-                                {statusBadge}
-                              </div>
-                            </div>
-
-                            {/* Card Body */}
-                            <div className="p-5 space-y-5">
-                              {/* Question Text */}
-                              <div className="space-y-2">
-                                {currentQuestion.questionTextHindi && (
-                                  <FormattedQuestionText
-                                    text={currentQuestion.questionTextHindi}
-                                    className="text-sm sm:text-base font-semibold text-slate-900 leading-relaxed"
-                                  />
-                                )}
-                                {currentQuestion.questionText && (
-                                  <FormattedQuestionText
-                                    text={currentQuestion.questionText}
-                                    className="text-xs sm:text-sm text-slate-700 leading-relaxed"
-                                  />
-                                )}
-                              </div>
-
-                              {/* Question Diagram / Image */}
-                              {(currentQuestion.questionImageUrl || currentQuestion.imageUrl) && (
-                                <div className="p-2 bg-slate-50 rounded-xl border border-slate-200 max-w-lg">
-                                  <CachedImage
-                                    src={currentQuestion.questionImageUrl || currentQuestion.imageUrl}
-                                    alt={`Question ${displayQNum} Diagram`}
-                                    className="w-full h-auto max-h-64 object-contain rounded-lg bg-white"
-                                    loading="lazy"
-                                  />
-                                </div>
-                              )}
-
-                              {/* Options Display (Stacked text + image support) */}
-                              <div className="space-y-2.5 pt-1">
-                                <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 block">
-                                  Options
-                                </span>
-
-                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                                  {(['A', 'B', 'C', 'D'] as const).map((key) => {
-                                    const isStudentPick = studentAns === key;
-                                    const isOfficialCorrect = currentQuestion.correctAnswer === key;
-                                    const optImg = currentQuestion.optionImages?.[key];
-                                    const optEng = currentQuestion.options?.[key];
-                                    const optHi = currentQuestion.optionsHindi?.[key];
-
-                                    // Color coding: Green if correct, Red if student's wrong selection, Neutral otherwise
-                                    let optContainerClass = 'bg-white border-slate-200 text-slate-700';
-                                    let optBadgeClass = 'bg-slate-100 text-slate-700 border-slate-300';
-
-                                    if (isOfficialCorrect) {
-                                      optContainerClass = 'bg-emerald-50/70 border-emerald-400 text-emerald-950 font-medium ring-1 ring-emerald-200';
-                                      optBadgeClass = 'bg-emerald-600 text-white border-emerald-600';
-                                    } else if (isStudentPick && !isCorrect) {
-                                      optContainerClass = 'bg-rose-50/70 border-rose-400 text-rose-950 font-medium ring-1 ring-rose-200';
-                                      optBadgeClass = 'bg-rose-600 text-white border-rose-600';
-                                    }
-
-                                    return (
-                                      <div
-                                        key={key}
-                                        className={`p-3.5 rounded-xl border text-xs flex flex-col justify-between gap-2.5 transition-all ${optContainerClass}`}
-                                      >
-                                        <div>
-                                          <div className="flex items-start justify-between gap-2">
-                                            <div className="flex items-start gap-2.5">
-                                              <span
-                                                className={`w-6 h-6 rounded-lg font-bold text-xs flex items-center justify-center shrink-0 border ${optBadgeClass}`}
-                                              >
-                                                {key}
-                                              </span>
-
-                                              <div className="space-y-0.5 min-w-0">
-                                                {optEng && optHi && optEng.trim() !== optHi.trim() ? (
-                                                  <>
-                                                    <FormattedQuestionText
-                                                      text={optEng}
-                                                      className="font-semibold text-slate-900"
-                                                    />
-                                                    <FormattedQuestionText
-                                                      text={optHi}
-                                                      className="text-slate-600 text-[11px]"
-                                                    />
-                                                  </>
-                                                ) : optEng || optHi ? (
-                                                  <FormattedQuestionText
-                                                    text={optEng || optHi}
-                                                    className="text-slate-900 font-medium"
-                                                  />
-                                                ) : (
-                                                  <div className="italic text-slate-400 text-[11px]">[Image Option]</div>
-                                                )}
-                                              </div>
-                                            </div>
-
-                                            {/* Status Badge */}
-                                            <div className="flex flex-col items-end gap-1 shrink-0">
-                                              {isOfficialCorrect && (
-                                                <span className="inline-flex items-center gap-1 text-[10px] font-bold bg-emerald-600 text-white px-2 py-0.5 rounded-full shadow-2xs">
-                                                  <CheckCircle2 className="w-3 h-3" />
-                                                  <span>Correct Option</span>
-                                                </span>
-                                              )}
-                                              {isStudentPick && !isCorrect && (
-                                                <span className="inline-flex items-center gap-1 text-[10px] font-bold bg-rose-600 text-white px-2 py-0.5 rounded-full shadow-2xs">
-                                                  <XCircle className="w-3 h-3" />
-                                                  <span>Your Choice (Wrong)</span>
-                                                </span>
-                                              )}
-                                              {isStudentPick && isCorrect && (
-                                                <span className="inline-flex items-center gap-1 text-[10px] font-bold bg-emerald-700 text-white px-2 py-0.5 rounded-full shadow-2xs">
-                                                  <CheckCircle2 className="w-3 h-3" />
-                                                  <span>Your Choice</span>
-                                                </span>
-                                              )}
-                                            </div>
-                                          </div>
-
-                                          {/* Stacked Option Image Below Text */}
-                                          {optImg?.imageUrl && (
-                                            <div className="mt-2.5 max-w-[220px] rounded-lg overflow-hidden border border-slate-200 bg-white p-1 shadow-2xs">
-                                              <CachedImage
-                                                src={optImg.imageUrl}
-                                                alt={`Option ${key} image`}
-                                                className="max-h-28 w-auto object-contain rounded"
-                                                loading="lazy"
-                                              />
-                                            </div>
-                                          )}
-                                        </div>
-                                      </div>
-                                    );
-                                  })}
-                                </div>
-                              </div>
-
-                              {/* Question Navigation Buttons: Right after options in the same card frame */}
-                              <div className="flex items-center justify-between gap-2.5 p-3 bg-slate-100/80 rounded-xl border border-slate-200 shadow-2xs">
-                                <button
-                                  type="button"
-                                  onClick={handlePrevQuestion}
-                                  disabled={currentFilteredIndex <= 0}
-                                  className="inline-flex items-center gap-1.5 px-3.5 sm:px-4 py-2 rounded-xl text-xs sm:text-sm font-bold text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 hover:text-slate-900 transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed shadow-2xs"
-                                >
-                                  <ChevronLeft className="w-4 h-4" />
-                                  <span>Previous</span>
-                                </button>
-
-                                {/* Question Navigator Button */}
-                                <button
-                                  type="button"
-                                  onClick={() => setIsMobilePaletteOpen(true)}
-                                  className="inline-flex items-center gap-1.5 px-3 sm:px-4 py-2 rounded-xl text-xs sm:text-sm font-bold text-indigo-700 bg-white border border-indigo-200 hover:bg-indigo-50 transition-all cursor-pointer shadow-2xs"
-                                >
-                                  <LayoutGrid className="w-3.5 h-3.5 text-indigo-600" />
-                                  <span>Q {displayQNum} of {totalQuestions}</span>
-                                </button>
-
-                                <button
-                                  type="button"
-                                  onClick={handleNextQuestion}
-                                  disabled={currentFilteredIndex >= filteredQuestions.length - 1}
-                                  className="inline-flex items-center gap-1.5 px-3.5 sm:px-4 py-2 rounded-xl text-xs sm:text-sm font-bold text-white bg-indigo-600 hover:bg-indigo-700 transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed shadow-2xs"
-                                >
-                                  <span>Next</span>
-                                  <ChevronRight className="w-4 h-4" />
-                                </button>
-                              </div>
-
-                              {/* Answer Review & Comparison Strip */}
-                              <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200/90 flex flex-wrap items-center justify-between gap-3 text-xs">
-                                <div className="flex flex-wrap items-center gap-3 sm:gap-4">
-                                  <div className="flex items-center gap-1.5">
-                                    <span className="text-slate-500 font-semibold">Your Answer:</span>
-                                    {isAttempted ? (
-                                      <span
-                                        className={`font-black px-2 py-0.5 rounded ${
-                                          isCorrect
-                                            ? 'bg-emerald-100 text-emerald-800'
-                                            : 'bg-rose-100 text-rose-800'
-                                        }`}
-                                      >
-                                        Option {studentAns}
-                                      </span>
-                                    ) : (
-                                      <span className="font-semibold text-slate-500 italic bg-slate-200/70 px-2 py-0.5 rounded">
-                                        Not Attempted
-                                      </span>
-                                    )}
-                                  </div>
-
-                                  <div className="flex items-center gap-1.5">
-                                    <span className="text-slate-500 font-semibold">Correct Answer:</span>
-                                    <span className="font-black px-2 py-0.5 rounded bg-emerald-100 text-emerald-800">
-                                      Option {currentQuestion.correctAnswer}
-                                    </span>
-                                  </div>
-
-                                  <div className="flex items-center gap-1.5">
-                                    <span className="text-slate-500 font-semibold">Status:</span>
-                                    {isAttempted && isCorrect ? (
-                                      <span className="font-bold text-emerald-700 flex items-center gap-1">
-                                        <CheckCircle2 className="w-3.5 h-3.5" /> Correct
-                                      </span>
-                                    ) : isAttempted && !isCorrect ? (
-                                      <span className="font-bold text-rose-700 flex items-center gap-1">
-                                        <XCircle className="w-3.5 h-3.5" /> Incorrect
-                                      </span>
-                                    ) : (
-                                      <span className="font-bold text-slate-500 flex items-center gap-1">
-                                        <MinusCircle className="w-3.5 h-3.5" /> Unattempted
-                                      </span>
-                                    )}
-                                  </div>
-                                </div>
-
-                                <div className="flex items-center gap-3 text-[11px] font-bold">
-                                  {avgTimePerQuestion && (
-                                    <div className="flex items-center gap-1 text-slate-600 bg-white px-2 py-0.5 rounded border border-slate-200">
-                                      <Clock className="w-3 h-3 text-indigo-600" />
-                                      <span>Avg Time: {avgTimePerQuestion}</span>
-                                    </div>
-                                  )}
-                                  <div className="flex items-center gap-1">
-                                    <span className="text-slate-500">Marks:</span>
-                                    {isAttempted && isCorrect ? (
-                                      <span className="text-emerald-700 font-black">+{posMarks}</span>
-                                    ) : isAttempted && !isCorrect ? (
-                                      <span className="text-rose-700 font-black">-{negMarks}</span>
-                                    ) : (
-                                      <span className="text-slate-600 font-black">0</span>
-                                    )}
-                                  </div>
-                                </div>
-                              </div>
-
-                              {/* Detailed Solution / Explanation */}
-                              {(currentQuestion.explanationHindi || currentQuestion.explanation) && (
-                                <div className="p-4 bg-indigo-50/50 rounded-xl border border-indigo-100 text-xs space-y-2">
-                                  <span className="font-bold text-indigo-950 flex items-center gap-1.5 text-xs">
-                                    <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
-                                    <span>Explanation / Solution:</span>
-                                  </span>
-                                  {currentQuestion.explanation && (
-                                    <FormattedQuestionText
-                                      text={currentQuestion.explanation}
-                                      className="text-slate-800 leading-relaxed"
-                                    />
-                                  )}
-                                  {currentQuestion.explanationHindi && (
-                                    <FormattedQuestionText
-                                      text={currentQuestion.explanationHindi}
-                                      className="text-slate-800 leading-relaxed pt-0.5"
-                                    />
-                                  )}
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        );
-                      })()}
-                    </div>
-
-                    {/* Desktop Right Side: Fixed/Sticky Question Navigation Panel */}
-                    <div className="hidden lg:block lg:col-span-4 sticky top-6 space-y-3">
-                      <div className="bg-white rounded-2xl p-4 shadow-xs border border-slate-200 space-y-3">
-                        <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
-                          <div className="flex items-center gap-1.5 text-xs font-bold text-slate-900">
-                            <LayoutGrid className="w-4 h-4 text-indigo-600" />
-                            <span>QUESTION NAVIGATION</span>
-                          </div>
-                          <span className="text-[11px] font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-md border border-indigo-100">
-                            {filteredQuestions.length} {activeFilter !== 'all' ? activeFilter : 'Total'}
-                          </span>
-                        </div>
-
-                        {/* Status Color Legend */}
-                        <div className="grid grid-cols-2 gap-2 text-[10px] font-bold text-slate-600 bg-slate-50 p-2.5 rounded-xl border border-slate-100">
-                          <div className="flex items-center gap-1.5">
-                            <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 shrink-0" />
-                            <span>Correct ({correctCount})</span>
-                          </div>
-                          <div className="flex items-center gap-1.5">
-                            <span className="w-2.5 h-2.5 rounded-full bg-rose-500 shrink-0" />
-                            <span>Incorrect ({incorrectCount})</span>
-                          </div>
-                          <div className="flex items-center gap-1.5">
-                            <span className="w-2.5 h-2.5 rounded-full bg-slate-300 shrink-0" />
-                            <span>Unattempted ({unattemptedCount})</span>
-                          </div>
-                          {markedForReviewCount > 0 && (
-                            <div className="flex items-center gap-1.5">
-                              <span className="w-2.5 h-2.5 rounded-full bg-purple-500 shrink-0" />
-                              <span>Marked ({markedForReviewCount})</span>
-                            </div>
-                          )}
-                        </div>
-
-                        {/* Question palette grid */}
-                        <div className="grid grid-cols-5 gap-2 max-h-[460px] overflow-y-auto p-1">
-                          {filteredQuestions.map((q) => {
-                            const studentPick = answers[q.id];
-                            const isPickCorrect = studentPick === q.correctAnswer;
-                            const isPickAttempted = Boolean(studentPick);
-                            const isPickMarked = markedIdsSet.has(q.id);
-                            const qIndex = questions.findIndex((item) => item.id === q.id);
-                            const qNum = q.questionNumber || qIndex + 1;
-                            const isSelected = q.id === currentQuestion.id;
-
-                            let btnBg = 'bg-slate-100 text-slate-700 hover:bg-slate-200 border-slate-200';
-                            if (isPickAttempted && isPickCorrect) {
-                              btnBg = 'bg-emerald-600 text-white hover:bg-emerald-700 border-emerald-600';
-                            } else if (isPickAttempted && !isPickCorrect) {
-                              btnBg = 'bg-rose-600 text-white hover:bg-rose-700 border-rose-600';
-                            }
-
-                            return (
-                              <button
-                                key={q.id}
-                                type="button"
-                                onClick={() => handleSelectQuestion(q.id)}
-                                title={`Q${qNum}: ${
-                                  !isPickAttempted ? 'Unattempted' : isPickCorrect ? 'Correct' : 'Incorrect'
-                                }${isPickMarked ? ' (Marked for Review)' : ''}`}
-                                className={`h-9 rounded-xl text-xs font-bold transition-all border flex items-center justify-center relative cursor-pointer ${btnBg} ${
-                                  isSelected
-                                    ? 'ring-3 ring-indigo-600 ring-offset-2 scale-105 shadow-md font-black z-10'
-                                    : 'hover:scale-102'
-                                }`}
-                              >
-                                {qNum}
-                                {isPickMarked && (
-                                  <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-purple-500 ring-1.5 ring-white" />
-                                )}
-                              </button>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    </div>
+                {/* Score Bar & Cutoff Comparison */}
+                <div className="pt-3 border-t border-outline-variant/15 grid grid-cols-2 gap-4">
+                  <div>
+                    <p className="text-[11px] text-on-surface-variant font-medium">
+                      Total Percentage
+                    </p>
+                    <p className="font-headline font-bold text-sm text-on-surface tabular-nums mt-0.5">
+                      {percentage}%
+                    </p>
                   </div>
-                ) : null}
-
-                {/* Mobile Question Navigator Drawer / Modal */}
-                {isMobilePaletteOpen && (
-                  <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
-                    <div
-                      className="fixed inset-0"
-                      onClick={() => setIsMobilePaletteOpen(false)}
-                    />
-                    <div className="relative bg-white w-full max-w-lg rounded-t-3xl sm:rounded-2xl max-h-[85vh] flex flex-col shadow-2xl z-10 overflow-hidden">
-                      {/* Drawer Header */}
-                      <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <LayoutGrid className="w-5 h-5 text-indigo-600" />
-                          <div>
-                            <h3 className="font-extrabold text-sm sm:text-base text-slate-900">
-                              Question Navigator
-                            </h3>
-                            <p className="text-[11px] text-slate-500">
-                              Showing {filteredQuestions.length} {activeFilter} questions
-                            </p>
-                          </div>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => setIsMobilePaletteOpen(false)}
-                          className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-600 flex items-center justify-center cursor-pointer transition-colors"
-                          aria-label="Close Navigator"
-                        >
-                          <X className="w-4 h-4" />
-                        </button>
-                      </div>
-
-                      {/* Drawer Filter Chips */}
-                      <div className="px-4 py-2.5 bg-slate-50 border-b border-slate-100 flex items-center gap-1.5 overflow-x-auto no-scrollbar">
-                        {(
-                          [
-                            { id: 'all', label: 'All', count: totalQuestions },
-                            { id: 'correct', label: 'Correct', count: correctCount },
-                            { id: 'incorrect', label: 'Incorrect', count: incorrectCount },
-                            { id: 'unattempted', label: 'Unattempted', count: unattemptedCount },
-                            ...(markedForReviewCount > 0
-                              ? [{ id: 'marked', label: 'Marked', count: markedForReviewCount }]
-                              : []),
-                          ] as const
-                        ).map((tab) => (
-                          <button
-                            key={tab.id}
-                            type="button"
-                            onClick={() => handleFilterChange(tab.id as any)}
-                            className={`px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap transition-all cursor-pointer ${
-                              activeFilter === tab.id
-                                ? 'bg-indigo-600 text-white shadow-2xs'
-                                : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-100'
-                            }`}
-                          >
-                            {tab.label} ({tab.count})
-                          </button>
-                        ))}
-                      </div>
-
-                      {/* Drawer Color Legend */}
-                      <div className="px-5 py-2.5 bg-slate-50/50 border-b border-slate-100 grid grid-cols-2 gap-2 text-[10px] font-bold text-slate-600">
-                        <div className="flex items-center gap-1.5">
-                          <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 shrink-0" />
-                          <span>Correct ({correctCount})</span>
-                        </div>
-                        <div className="flex items-center gap-1.5">
-                          <span className="w-2.5 h-2.5 rounded-full bg-rose-500 shrink-0" />
-                          <span>Incorrect ({incorrectCount})</span>
-                        </div>
-                        <div className="flex items-center gap-1.5">
-                          <span className="w-2.5 h-2.5 rounded-full bg-slate-300 shrink-0" />
-                          <span>Unattempted ({unattemptedCount})</span>
-                        </div>
-                        {markedForReviewCount > 0 && (
-                          <div className="flex items-center gap-1.5">
-                            <span className="w-2.5 h-2.5 rounded-full bg-purple-500 shrink-0" />
-                            <span>Marked ({markedForReviewCount})</span>
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Drawer Question Grid */}
-                      <div className="p-4 overflow-y-auto max-h-[50vh]">
-                        <div className="grid grid-cols-5 sm:grid-cols-6 gap-2">
-                          {filteredQuestions.map((q) => {
-                            const studentPick = answers[q.id];
-                            const isPickCorrect = studentPick === q.correctAnswer;
-                            const isPickAttempted = Boolean(studentPick);
-                            const isPickMarked = markedIdsSet.has(q.id);
-                            const qIndex = questions.findIndex((item) => item.id === q.id);
-                            const qNum = q.questionNumber || qIndex + 1;
-                            const isSelected = q.id === currentQuestion?.id;
-
-                            let btnBg = 'bg-slate-100 text-slate-700 hover:bg-slate-200 border-slate-200';
-                            if (isPickAttempted && isPickCorrect) {
-                              btnBg = 'bg-emerald-600 text-white hover:bg-emerald-700 border-emerald-600';
-                            } else if (isPickAttempted && !isPickCorrect) {
-                              btnBg = 'bg-rose-600 text-white hover:bg-rose-700 border-rose-600';
-                            }
-
-                            return (
-                              <button
-                                key={q.id}
-                                type="button"
-                                onClick={() => handleSelectQuestion(q.id)}
-                                className={`h-10 rounded-xl text-xs font-bold transition-all border flex items-center justify-center relative cursor-pointer ${btnBg} ${
-                                  isSelected
-                                    ? 'ring-3 ring-indigo-600 ring-offset-2 scale-105 shadow-md font-black'
-                                    : ''
-                                }`}
-                              >
-                                {qNum}
-                                {isPickMarked && (
-                                  <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-purple-500 ring-1.5 ring-white" />
-                                )}
-                              </button>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    </div>
+                  <div className="border-l border-outline-variant/15 pl-4">
+                    <p className="text-[11px] text-on-surface-variant font-medium">
+                      Marking Scheme
+                    </p>
+                    <p className="font-headline font-bold text-sm text-on-surface tabular-nums mt-0.5">
+                      +{posMarks} / -{negMarks}{' '}
+                      <span className="text-[11px] font-medium text-emerald-600">
+                        ({correctCount} Right)
+                      </span>
+                    </p>
                   </div>
-                )}
+                </div>
               </div>
-            ) : (
-              <div className="bg-white rounded-2xl p-6 border border-slate-200 text-center space-y-2">
-                <CheckCircle2 className="w-8 h-8 text-emerald-600 mx-auto" />
-                <h3 className="font-bold text-slate-900 text-sm">Response Sheet Recorded</h3>
-                <p className="text-xs text-slate-500 max-w-sm mx-auto">
-                  Your score and metrics have been evaluated successfully.
-                </p>
-              </div>
-            )}
+            </section>
 
-            {/* Released Test Reattempt Card */}
-            {test?.status === 'released' && onReattempt && (
-              <div className="bg-linear-to-r from-emerald-50 via-teal-50 to-indigo-50 border border-emerald-200 rounded-2xl p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 print:hidden">
-                <div className="space-y-1">
-                  <div className="flex items-center gap-2">
-                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
-                    <h3 className="font-bold text-sm sm:text-base text-slate-900">
-                      Want to Improve Your Score?
-                    </h3>
+            {/* 2x2 Key Metrics Bento Grid */}
+            <section className="grid grid-cols-2 gap-3">
+              {/* Rank Card */}
+              <div className="bg-surface-container-lowest rounded-xl p-4 border border-outline-variant/15 flex flex-col justify-between">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-medium text-on-surface-variant">Rank</span>
+                  <div className="w-7 h-7 rounded-lg bg-primary-fixed flex items-center justify-center text-primary">
+                    <Award className="w-4 h-4" />
                   </div>
-                  <p className="text-xs text-slate-600">
-                    This released test is available for unlimited reattempts anytime. You can take it again, and all your past attempt scores remain saved in your history.
+                </div>
+                <div className="mt-3 tabular-nums">
+                  <p className="font-headline font-extrabold text-xl text-on-surface">
+                    #{rankInfo.rank}{' '}
+                    <span className="text-xs font-normal text-outline">
+                      / {rankInfo.totalParticipants}
+                    </span>
+                  </p>
+                  <p className="text-[11px] text-primary font-semibold mt-0.5">
+                    {rankInfo.rank === 1
+                      ? 'Top Scorer'
+                      : `Among ${rankInfo.totalParticipants} Submissions`}
                   </p>
                 </div>
+              </div>
+
+              {/* Percentile Card */}
+              <div className="bg-surface-container-lowest rounded-xl p-4 border border-outline-variant/15 flex flex-col justify-between">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-medium text-on-surface-variant">Percentile</span>
+                  <div className="w-7 h-7 rounded-lg bg-secondary-fixed flex items-center justify-center text-secondary">
+                    <TrendingUp className="w-4 h-4" />
+                  </div>
+                </div>
+                <div className="mt-3 tabular-nums">
+                  <p className="font-headline font-extrabold text-xl text-on-surface">
+                    {rankInfo.percentile}%
+                  </p>
+                  <div className="w-full h-1.5 bg-surface-container rounded-full mt-1.5 overflow-hidden">
+                    <div
+                      className="bg-primary h-full rounded-full"
+                      style={{ width: `${Math.min(100, Math.max(5, rankInfo.percentile))}%` }}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Accuracy Card */}
+              <div className="bg-surface-container-lowest rounded-xl p-4 border border-outline-variant/15 flex flex-col justify-between">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-medium text-on-surface-variant">
+                    Overall Accuracy
+                  </span>
+                  <div className="w-7 h-7 rounded-lg bg-emerald-100 flex items-center justify-center text-emerald-700">
+                    <Target className="w-4 h-4" />
+                  </div>
+                </div>
+                <div className="mt-3 tabular-nums">
+                  <p className="font-headline font-extrabold text-xl text-on-surface">
+                    {accuracy}%
+                  </p>
+                  <p className="text-[11px] text-emerald-700 font-medium mt-0.5">
+                    {correctCount}/{attemptedCount} Attempted Right
+                  </p>
+                </div>
+              </div>
+
+              {/* Average Aspirant Score Card */}
+              <div className="bg-surface-container-lowest rounded-xl p-4 border border-outline-variant/15 flex flex-col justify-between">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-medium text-on-surface-variant">
+                    Avg. Aspirant Score
+                  </span>
+                  <div className="w-7 h-7 rounded-lg bg-tertiary-fixed flex items-center justify-center text-tertiary">
+                    <BarChart3 className="w-4 h-4" />
+                  </div>
+                </div>
+                <div className="mt-3 tabular-nums">
+                  <p className="font-headline font-extrabold text-xl text-on-surface">
+                    {rankInfo.avgScore}{' '}
+                    <span className="text-xs font-normal text-outline">/{maxPossibleMarks}</span>
+                  </p>
+                  <p className="text-[11px] text-on-surface-variant font-medium mt-0.5">
+                    {finalScore >= rankInfo.avgScore
+                      ? `+${(finalScore - rankInfo.avgScore).toFixed(1)} above average`
+                      : `${(finalScore - rankInfo.avgScore).toFixed(1)} vs average`}
+                  </p>
+                </div>
+              </div>
+            </section>
+
+            {/* Question Breakdown & Negative Marking Analysis */}
+            <section className="bg-surface-container-lowest rounded-xl p-5 border border-outline-variant/15 space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="font-headline font-bold text-sm text-on-surface">
+                  Question Distribution
+                </h3>
+                <span className="text-xs font-medium text-on-surface-variant tabular-nums">
+                  Total: {totalQuestions} Qs
+                </span>
+              </div>
+
+              {/* Segmented Visual Bar */}
+              <div className="h-2.5 w-full rounded-full bg-surface-container overflow-hidden flex gap-0.5">
+                {correctPctBar > 0 && (
+                  <div
+                    className="bg-primary h-full transition-all"
+                    style={{ width: `${correctPctBar}%` }}
+                    title={`Correct: ${correctCount}`}
+                  />
+                )}
+                {wrongPctBar > 0 && (
+                  <div
+                    className="bg-error h-full transition-all"
+                    style={{ width: `${wrongPctBar}%` }}
+                    title={`Wrong: ${incorrectCount}`}
+                  />
+                )}
+                {skippedPctBar > 0 && (
+                  <div
+                    className="bg-surface-dim h-full transition-all"
+                    style={{ width: `${skippedPctBar}%` }}
+                    title={`Skipped: ${unattemptedCount}`}
+                  />
+                )}
+              </div>
+
+              {/* 3-Column Stat Boxes */}
+              <div className="grid grid-cols-3 gap-2.5 pt-1 tabular-nums">
+                <div className="bg-surface-container-low rounded-lg p-3">
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-primary" />
+                    <span className="text-[11px] font-medium text-on-surface-variant">
+                      Correct
+                    </span>
+                  </div>
+                  <p className="font-headline font-extrabold text-lg text-on-surface mt-1">
+                    {correctCount}
+                  </p>
+                  <p className="text-[10px] font-semibold text-primary">
+                    +{(correctCount * posMarks).toFixed(2)} Marks
+                  </p>
+                </div>
+
+                <div className="bg-error-container/30 rounded-lg p-3">
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-error" />
+                    <span className="text-[11px] font-medium text-on-error-container">Wrong</span>
+                  </div>
+                  <p className="font-headline font-extrabold text-lg text-error mt-1">
+                    {incorrectCount}
+                  </p>
+                  <p className="text-[10px] font-semibold text-error">
+                    -{negativePenalty.toFixed(2)} Marks
+                  </p>
+                </div>
+
+                <div className="bg-surface-container-low rounded-lg p-3">
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-outline" />
+                    <span className="text-[11px] font-medium text-on-surface-variant">
+                      Skipped
+                    </span>
+                  </div>
+                  <p className="font-headline font-extrabold text-lg text-on-surface mt-1">
+                    {unattemptedCount}
+                  </p>
+                  <p className="text-[10px] font-medium text-outline">0.00 Marks</p>
+                </div>
+              </div>
+
+              {/* Negative Marking Impact Strip */}
+              <div className="flex items-center justify-between bg-surface-container-low px-3.5 py-2.5 rounded-lg">
+                <div className="flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 text-error" />
+                  <span className="text-xs font-medium text-on-surface">
+                    Negative Marking Penalty (-{negMarks}/wrong)
+                  </span>
+                </div>
+                <span className="font-headline font-bold text-xs text-error tabular-nums">
+                  -{negativePenalty.toFixed(2)} Marks
+                </span>
+              </div>
+            </section>
+
+            {/* Sectional / Subject Breakdown */}
+            {sectionalBreakdown.length > 0 && (
+              <section className="space-y-3">
+                <div className="flex items-center justify-between px-0.5">
+                  <h3 className="font-headline font-bold text-sm text-on-surface">
+                    Sectional Breakdown
+                  </h3>
+                  <span className="text-[11px] font-semibold text-primary">
+                    {sectionalBreakdown.length}{' '}
+                    {sectionalBreakdown.length === 1 ? 'Section' : 'Sections'}
+                  </span>
+                </div>
+
+                <div className="space-y-2.5">
+                  {sectionalBreakdown.map((sec) => (
+                    <div
+                      key={sec.subject}
+                      className="bg-surface-container-lowest rounded-xl p-4 border border-outline-variant/15 space-y-2.5"
+                    >
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="font-headline font-bold text-xs text-on-surface">
+                            {sec.subject}
+                          </p>
+                          <p className="text-[11px] text-on-surface-variant tabular-nums">
+                            {sec.correct} Correct &bull; {sec.wrong} Wrong &bull; {sec.skipped}{' '}
+                            Skipped
+                          </p>
+                        </div>
+                        <div className="text-right tabular-nums">
+                          <span className="font-headline font-extrabold text-sm text-on-surface">
+                            {sec.score}
+                          </span>
+                          <span className="text-xs text-outline"> / {sec.maxMarks}</span>
+                          <span
+                            className={`block text-[10px] font-semibold px-1.5 py-0.5 rounded mt-0.5 ${
+                              sec.accuracy >= 70
+                                ? 'text-primary bg-primary-fixed'
+                                : 'text-tertiary bg-tertiary-fixed'
+                            }`}
+                          >
+                            {sec.accuracy}% Acc.
+                          </span>
+                        </div>
+                      </div>
+                      <div className="w-full h-1.5 bg-surface-container rounded-full overflow-hidden">
+                        <div
+                          className={`h-full rounded-full ${
+                            sec.accuracy >= 70 ? 'bg-primary' : 'bg-tertiary-container'
+                          }`}
+                          style={{ width: `${sec.pctWidth}%` }}
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {/* Primary Call To Action Block (Strictly Separate Answer Key Page Navigation) */}
+            <section className="pt-2 space-y-3 print:hidden">
+              <button
+                type="button"
+                onClick={() => {
+                  if (onOpenAnswerKey) {
+                    onOpenAnswerKey(currentAttempt);
+                  } else {
+                    setShowAnswerKeyScreen(true);
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                  }
+                }}
+                className="w-full bg-linear-to-r from-primary to-primary-container text-on-primary font-headline font-bold text-base py-4 px-6 rounded-xl shadow-md flex items-center justify-between active:scale-[0.98] transition-all cursor-pointer group"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-lg bg-white/15 flex items-center justify-center">
+                    <CheckCheck className="w-5 h-5 text-white" />
+                  </div>
+                  <div className="text-left">
+                    <span className="block leading-none">View Answer Key &amp; Solutions</span>
+                    <span className="text-[11px] font-body font-normal text-on-primary-container opacity-90 mt-1 block">
+                      Step-by-step explanations for all {totalQuestions} questions
+                    </span>
+                  </div>
+                </div>
+                <ArrowRight className="w-5 h-5 group-hover:translate-x-0.5 transition-transform" />
+              </button>
+
+              {/* Secondary Action Buttons */}
+              <div className="grid grid-cols-2 gap-3">
                 <button
                   type="button"
-                  onClick={() => onReattempt(test)}
-                  className="px-5 py-2.5 rounded-xl bg-linear-to-r from-emerald-600 to-teal-700 hover:from-emerald-700 hover:to-teal-800 text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-xs transition-all cursor-pointer shrink-0"
+                  onClick={() => setShowAttemptHistoryPanel((prev) => !prev)}
+                  className="bg-surface-container-low hover:bg-surface-container text-on-surface font-headline font-bold text-xs py-3.5 px-4 rounded-xl flex items-center justify-center gap-2 active:scale-[0.98] transition-all cursor-pointer"
                 >
-                  <RotateCw className="w-4 h-4" />
-                  <span>Start Reattempt Now</span>
+                  <History className="w-4 h-4 text-primary" />
+                  <span>Attempt History ({allAttempts.length})</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={onBackToPortal}
+                  className="bg-surface-container-low hover:bg-surface-container text-on-surface font-headline font-bold text-xs py-3.5 px-4 rounded-xl flex items-center justify-center gap-2 active:scale-[0.98] transition-all cursor-pointer"
+                >
+                  <LayoutDashboard className="w-4 h-4 text-on-surface-variant" />
+                  <span>Back to Dashboard</span>
                 </button>
               </div>
-            )}
-          </div>
+            </section>
+
+            {/* Mentor Insight Card */}
+            <section className="bg-surface-container-low rounded-xl p-4 flex items-start gap-3.5 border border-outline-variant/20">
+              <div className="w-9 h-9 rounded-lg bg-primary text-on-primary flex items-center justify-center shrink-0 mt-0.5">
+                <Sparkles className="w-4 h-4" />
+              </div>
+              <div className="space-y-1">
+                <h4 className="font-headline font-bold text-xs text-on-surface">
+                  Performance Insight
+                </h4>
+                <p className="text-xs text-on-surface-variant leading-relaxed">
+                  {incorrectCount > 0 ? (
+                    <>
+                      Reviewing your{' '}
+                      <span className="font-semibold text-on-surface">
+                        {incorrectCount} incorrect responses
+                      </span>{' '}
+                      (which deducted{' '}
+                      <span className="font-semibold text-error">
+                        -{negativePenalty.toFixed(2)} marks
+                      </span>
+                      ) and{' '}
+                      <span className="font-semibold text-on-surface">
+                        {unattemptedCount} unattempted questions
+                      </span>{' '}
+                      in the Answer Key can help boost your score by up to{' '}
+                      <span className="font-semibold text-primary">
+                        +{(incorrectCount * posMarks + negativePenalty).toFixed(1)} marks
+                      </span>
+                      .
+                    </>
+                  ) : unattemptedCount > 0 ? (
+                    <>
+                      Excellent accuracy! You made zero negative-marking mistakes. Review the{' '}
+                      <span className="font-semibold text-on-surface">
+                        {unattemptedCount} unattempted questions
+                      </span>{' '}
+                      in the Answer Key to maximize your total score.
+                    </>
+                  ) : (
+                    <>
+                      Outstanding attempt! Open the Answer Key &amp; Solutions to review the verified explanations for all {totalQuestions} questions.
+                    </>
+                  )}
+                </p>
+              </div>
+            </section>
+          </>
         )}
-      </div>
+      </main>
     </div>
   );
 };

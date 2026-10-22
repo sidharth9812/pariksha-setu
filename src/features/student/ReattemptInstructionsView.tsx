@@ -1,9 +1,7 @@
 import React, { useState } from 'react';
 import {
   Clock,
-  AlertCircle,
   BookOpen,
-  Award,
   RotateCw,
   ArrowLeft,
   ArrowRight,
@@ -11,8 +9,6 @@ import {
   FileText,
   Globe,
   CheckCircle2,
-  Check,
-  AlertTriangle,
   Scale,
   Target,
   Sparkles,
@@ -46,381 +42,315 @@ export const ReattemptInstructionsView: React.FC<ReattemptInstructionsViewProps>
 
   const hasNegativeMarking = Boolean(test.negativeMarks && test.negativeMarks > 0);
 
-  // Dynamic syllabus parsing & fallback topics
   const defaultSyllabusTopics = [
     {
       title: 'General Knowledge & Current Affairs',
-      topics: 'State & National History, Geography, Indian Constitution, Polity, Key Events & Awards',
+      topics:
+        'State & National History, Geography, Indian Constitution, Polity, Key Events & Awards',
     },
     {
       title: 'Reasoning & Analytical Ability',
-      topics: 'Analogies, Syllogisms, Number Series, Coding-Decoding, Direction Sense, Blood Relations',
+      topics:
+        'Analogies, Syllogisms, Number Series, Coding-Decoding, Direction Sense, Blood Relations',
     },
     {
       title: 'Numerical & Mathematical Ability',
-      topics: 'Averages, Ratio & Proportion, Percentages, Profit & Loss, Time & Work, Speed & Distance',
+      topics:
+        'Averages, Ratio & Proportion, Percentages, Profit & Loss, Time & Work, Speed & Distance',
     },
     {
       title: 'General Science & Environment',
-      topics: 'Basic Physics, Chemistry, Biology, Human Anatomy, Environmental Ecology & Daily Life Science',
+      topics:
+        'Basic Physics, Chemistry, Biology, Human Anatomy, Environmental Ecology & Daily Life Science',
     },
   ];
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-800 flex flex-col">
-      {/* Top Header Bar */}
-      <header className="bg-white border-b border-slate-200 sticky top-0 z-30 shadow-xs">
-        <div className="max-w-5xl mx-auto px-4 sm:px-6 py-3.5 flex items-center justify-between gap-4">
+    <div className="min-h-screen bg-surface font-body text-on-surface flex flex-col antialiased">
+      {/* Top App Bar */}
+      <header className="bg-surface/90 backdrop-blur-md border-b border-outline-variant/20 sticky top-0 z-30">
+        <div className="max-w-4xl mx-auto px-4 sm:px-6 h-14 flex items-center justify-between gap-4">
           <button
             type="button"
             onClick={onCancel}
-            className="inline-flex items-center gap-1.5 text-xs sm:text-sm font-semibold text-slate-600 hover:text-slate-900 transition-colors cursor-pointer"
+            className="inline-flex items-center gap-1.5 font-headline text-xs sm:text-sm font-bold text-on-surface hover:text-primary transition-colors cursor-pointer"
           >
             <ArrowLeft className="w-4 h-4" />
             <span>Back to Portal</span>
           </button>
 
-          {/* Language Selector Dropdown */}
           <div className="flex items-center gap-2">
-            <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-600">
-              <Globe className="w-4 h-4 text-indigo-600 shrink-0" />
-              <span className="hidden sm:inline">Instruction Language:</span>
+            <div className="flex items-center gap-1.5 text-xs font-semibold text-on-surface-variant">
+              <Globe className="w-4 h-4 text-primary shrink-0" />
+              <span className="hidden sm:inline">Guidelines:</span>
             </div>
             <select
               value={selectedLanguage}
               onChange={(e) => setSelectedLanguage(e.target.value as InstructionLanguage)}
-              className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 border border-slate-300 rounded-xl text-xs font-bold text-slate-800 outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer transition-all"
+              className="px-3 py-1.5 bg-surface-container-low hover:bg-surface-container border border-outline-variant/30 rounded-xl text-xs font-headline font-bold text-on-surface outline-none focus:ring-2 focus:ring-primary cursor-pointer transition-all"
             >
-              <option value="standard">English (Standard Exam Guidelines)</option>
-              <option value="detailed">English (Detailed Regulations & Policy)</option>
-              <option value="simplified">English (Simplified Quick Checklist)</option>
+              <option value="standard">English (Standard Guidelines)</option>
+              <option value="detailed">English (Detailed Regulations)</option>
+              <option value="simplified">English (Quick Checklist)</option>
             </select>
           </div>
         </div>
       </header>
 
       {/* Main Content Area */}
-      <main className="flex-1 max-w-5xl w-full mx-auto px-4 sm:px-6 py-6 sm:py-8 space-y-6">
-        {/* Banner Card */}
-        <div className="bg-linear-to-r from-indigo-900 via-slate-900 to-indigo-950 rounded-3xl p-6 sm:p-8 text-white shadow-md relative overflow-hidden">
-          <div className="absolute right-0 bottom-0 translate-x-10 translate-y-10 opacity-10 pointer-events-none">
-            <RotateCw className="w-64 h-64 text-white" />
-          </div>
+      <main className="flex-1 max-w-4xl w-full mx-auto px-4 sm:px-6 py-6 space-y-5">
+        {/* Hero Exam Banner Card */}
+        <div className="bg-linear-to-br from-primary via-primary-container to-surface-tint rounded-2xl p-6 sm:p-7 text-on-primary shadow-md relative overflow-hidden">
+          <div className="absolute -right-8 -top-8 w-36 h-36 rounded-full bg-white/10 blur-2xl pointer-events-none" />
 
           <div className="relative z-10 space-y-3">
             <div className="flex flex-wrap items-center gap-2">
-              <span className="px-3 py-1 rounded-full text-[11px] font-black uppercase tracking-wider bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 flex items-center gap-1.5">
-                <RotateCw className="w-3.5 h-3.5 animate-spin-reverse" />
-                <span>Reattempt Mode</span>
+              <span className="px-2.5 py-0.5 rounded-md text-[11px] font-headline font-bold uppercase tracking-wider bg-white/20 text-white flex items-center gap-1.5">
+                <RotateCw className="w-3.5 h-3.5" />
+                <span>Practice &amp; Reattempt Mode</span>
               </span>
-              <span className="px-3 py-1 rounded-full text-[11px] font-bold uppercase tracking-wider bg-white/10 text-slate-200 border border-white/10">
-                {test.examCategory || 'Competitive Examination'}
+              <span className="px-2.5 py-0.5 rounded-md text-[11px] font-headline font-bold uppercase tracking-wider bg-white/15 text-on-primary-container">
+                {test.examCategory || 'Competitive Exam'}
               </span>
               {test.seriesTitle && (
-                <span className="hidden md:inline-block px-3 py-1 rounded-full text-[11px] font-medium bg-indigo-500/20 text-indigo-200 border border-indigo-400/20">
+                <span className="hidden md:inline-block px-2.5 py-0.5 rounded-md text-[11px] font-medium bg-white/10 text-on-primary-container">
                   {test.seriesTitle}
                 </span>
               )}
             </div>
 
-            <h1 className="text-xl sm:text-3xl font-black tracking-tight text-white">
+            <h1 className="font-headline text-xl sm:text-2xl font-extrabold tracking-tight text-white">
               {test.title}
             </h1>
 
-            <p className="text-xs sm:text-sm text-slate-300 max-w-2xl leading-relaxed">
+            <p className="text-xs sm:text-sm text-on-primary-container max-w-2xl leading-relaxed">
               {selectedLanguage === 'detailed'
-                ? 'Welcome to the reattempt session. Carefully review all examination parameters including marking scheme, time allowance, question counts, and syllabus domain before commencing.'
+                ? 'Welcome to the examination session. Carefully review all parameters including marking scheme, time allowance, question count, and syllabus scope before commencing.'
                 : selectedLanguage === 'simplified'
-                ? 'Review the test details below. Once you click Start, your fresh reattempt will begin immediately.'
-                : 'Please review all examination details, negative marking rules, time allocation, and syllabus topics below before starting your reattempt.'}
+                ? 'Review the test details below. Once you click Start Test Now, your timed session will begin immediately.'
+                : 'Please review the examination marking rules, time allocation, and syllabus topics below before starting your test.'}
             </p>
 
-            <div className="pt-2 flex flex-wrap items-center gap-2 text-xs font-semibold text-emerald-400">
-              <Sparkles className="w-4 h-4 shrink-0" />
+            <div className="pt-1 flex flex-wrap items-center gap-2 text-xs font-semibold text-white">
+              <Sparkles className="w-4 h-4 text-amber-300 shrink-0" />
               <span>Candidate: {candidateName}</span>
               <span>&bull;</span>
-              <span className="text-emerald-300 font-bold bg-emerald-500/20 px-2 py-0.5 rounded border border-emerald-400/30">
-                No Password or Code Required
+              <span className="bg-white/15 px-2 py-0.5 rounded text-[11px] font-headline font-bold">
+                All previous attempts remain saved
               </span>
-              <span>&bull;</span>
-              <span>All previous attempt scores remain saved</span>
             </div>
           </div>
         </div>
 
-        {/* Essential Exam Parameters (Grid Cards) */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          {/* Card 1: Time / Duration */}
-          <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-xs flex flex-col justify-between space-y-3">
+        {/* 2x2 / 4-Column Exam Parameters Bento Grid */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 tabular-nums">
+          <div className="bg-surface-container-lowest rounded-xl p-4 border border-outline-variant/20 flex flex-col justify-between space-y-2">
             <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+              <span className="text-[11px] font-headline font-bold uppercase tracking-wider text-on-surface-variant">
                 Total Time
               </span>
-              <div className="p-2 rounded-xl bg-blue-50 text-blue-600">
-                <Clock className="w-5 h-5" />
+              <div className="w-7 h-7 rounded-lg bg-primary-fixed text-primary flex items-center justify-center">
+                <Clock className="w-4 h-4" />
               </div>
             </div>
             <div>
-              <div className="text-2xl font-black text-slate-900">
-                {test.durationMinutes} <span className="text-sm font-semibold text-slate-500">Mins</span>
+              <div className="font-headline text-2xl font-extrabold text-on-surface">
+                {test.durationMinutes}{' '}
+                <span className="text-xs font-semibold text-on-surface-variant">Mins</span>
               </div>
-              <p className="text-[11px] text-slate-500 mt-1 leading-normal">
-                Continuous countdown timer. Test will automatically submit when timer reaches 00:00.
+              <p className="text-[11px] text-on-surface-variant mt-0.5">
+                Auto-submits when timer ends
               </p>
             </div>
           </div>
 
-          {/* Card 2: No. of Questions */}
-          <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-xs flex flex-col justify-between space-y-3">
+          <div className="bg-surface-container-lowest rounded-xl p-4 border border-outline-variant/20 flex flex-col justify-between space-y-2">
             <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
-                Total Questions
+              <span className="text-[11px] font-headline font-bold uppercase tracking-wider text-on-surface-variant">
+                Questions
               </span>
-              <div className="p-2 rounded-xl bg-indigo-50 text-indigo-600">
-                <FileText className="w-5 h-5" />
+              <div className="w-7 h-7 rounded-lg bg-secondary-fixed text-secondary flex items-center justify-center">
+                <FileText className="w-4 h-4" />
               </div>
             </div>
             <div>
-              <div className="text-2xl font-black text-slate-900">
-                {test.totalQuestions} <span className="text-sm font-semibold text-slate-500">MCQs</span>
+              <div className="font-headline text-2xl font-extrabold text-on-surface">
+                {test.totalQuestions}{' '}
+                <span className="text-xs font-semibold text-on-surface-variant">MCQs</span>
               </div>
-              <p className="text-[11px] text-slate-500 mt-1 leading-normal">
-                Multiple-choice questions with 4 choices each. You can mark questions for review.
+              <p className="text-[11px] text-on-surface-variant mt-0.5">
+                4 options per question
               </p>
             </div>
           </div>
 
-          {/* Card 3: Negative Marking */}
           <div
-            className={`rounded-2xl p-5 border shadow-xs flex flex-col justify-between space-y-3 ${
+            className={`rounded-xl p-4 border flex flex-col justify-between space-y-2 ${
               hasNegativeMarking
-                ? 'bg-amber-50/70 border-amber-200 text-amber-950'
-                : 'bg-emerald-50/70 border-emerald-200 text-emerald-950'
+                ? 'bg-error-container/25 border-error/20'
+                : 'bg-emerald-50/70 border-emerald-200'
             }`}
           >
             <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-600">
-                Negative Marking
+              <span className="text-[11px] font-headline font-bold uppercase tracking-wider text-on-surface-variant">
+                Negative Mark
               </span>
               <div
-                className={`p-2 rounded-xl ${
-                  hasNegativeMarking ? 'bg-amber-200 text-amber-900' : 'bg-emerald-200 text-emerald-900'
+                className={`w-7 h-7 rounded-lg flex items-center justify-center ${
+                  hasNegativeMarking
+                    ? 'bg-error-container text-error'
+                    : 'bg-emerald-100 text-emerald-700'
                 }`}
               >
-                <Scale className="w-5 h-5" />
+                <Scale className="w-4 h-4" />
               </div>
             </div>
             <div>
-              <div className="text-2xl font-black">
-                {hasNegativeMarking ? (
-                  <>
-                    -{test.negativeMarks}{' '}
-                    <span className="text-sm font-semibold text-amber-800">per wrong</span>
-                  </>
-                ) : (
-                  <span className="text-emerald-700">No Penalty</span>
-                )}
+              <div
+                className={`font-headline text-2xl font-extrabold ${
+                  hasNegativeMarking ? 'text-error' : 'text-emerald-700'
+                }`}
+              >
+                {hasNegativeMarking ? `-${test.negativeMarks}` : 'None'}
               </div>
-              <p className="text-[11px] mt-1 leading-normal opacity-90">
-                {hasNegativeMarking
-                  ? `Each incorrect answer deducts ${test.negativeMarks} marks. Unattempted questions have 0 penalty.`
-                  : 'Zero negative marks. You may answer all questions without point deductions.'}
+              <p className="text-[11px] text-on-surface-variant mt-0.5">
+                {hasNegativeMarking ? 'Deducted per wrong answer' : 'Zero penalty for wrong'}
               </p>
             </div>
           </div>
 
-          {/* Card 4: Marks Scheme & Passing */}
-          <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-xs flex flex-col justify-between space-y-3">
+          <div className="bg-surface-container-lowest rounded-xl p-4 border border-outline-variant/20 flex flex-col justify-between space-y-2">
             <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
-                Scoring Scheme
+              <span className="text-[11px] font-headline font-bold uppercase tracking-wider text-on-surface-variant">
+                Scoring
               </span>
-              <div className="p-2 rounded-xl bg-purple-50 text-purple-600">
-                <Target className="w-5 h-5" />
+              <div className="w-7 h-7 rounded-lg bg-tertiary-fixed text-tertiary flex items-center justify-center">
+                <Target className="w-4 h-4" />
               </div>
             </div>
             <div>
-              <div className="text-2xl font-black text-slate-900">
-                +{test.marksPerQuestion || 1} <span className="text-sm font-semibold text-slate-500">/ Question</span>
+              <div className="font-headline text-2xl font-extrabold text-primary">
+                +{test.marksPerQuestion || 1}{' '}
+                <span className="text-xs font-semibold text-on-surface-variant">/ Q</span>
               </div>
-              <p className="text-[11px] text-slate-500 mt-1 leading-normal">
-                Max Marks: <strong>{totalMarks}</strong> &bull; Passing Marks: <strong>{passingMarks}</strong>
+              <p className="text-[11px] text-on-surface-variant mt-0.5">
+                Max: <strong>{totalMarks}</strong> &bull; Pass: <strong>{passingMarks}</strong>
               </p>
             </div>
           </div>
         </div>
 
-        {/* SYLLABUS SECTION (IN A PROPER, STRUCTURED BOX) */}
-        <div className="bg-white rounded-3xl border-2 border-indigo-100 shadow-sm overflow-hidden">
-          {/* Syllabus Header */}
-          <div className="bg-linear-to-r from-slate-900 via-indigo-950 to-slate-900 px-6 py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-white">
-            <div className="flex items-center gap-2.5">
-              <div className="p-2 rounded-xl bg-indigo-500/20 text-indigo-300 border border-indigo-400/30">
-                <BookOpen className="w-5 h-5" />
-              </div>
-              <div>
-                <h2 className="text-base sm:text-lg font-bold tracking-tight text-white">
-                  Official Examination Syllabus & Subject Coverage
-                </h2>
-                <p className="text-xs text-indigo-200">
-                  Detailed curriculum scope tested in this examination paper
-                </p>
-              </div>
+        {/* Official Examination Syllabus Card */}
+        <div className="bg-surface-container-lowest rounded-2xl border border-outline-variant/20 shadow-2xs overflow-hidden">
+          <div className="bg-surface-container-low px-5 py-3.5 border-b border-outline-variant/15 flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <BookOpen className="w-4 h-4 text-primary" />
+              <h2 className="font-headline text-sm font-bold text-on-surface">
+                Official Examination Syllabus &amp; Subject Coverage
+              </h2>
             </div>
-
-            <span className="self-start sm:self-auto text-[11px] font-bold px-3 py-1 rounded-full bg-white/10 text-white border border-white/15">
-              Subject: {test.subject || test.examCategory || 'Standard Syllabus'}
+            <span className="text-[11px] font-headline font-bold px-2.5 py-0.5 rounded-md bg-primary-fixed text-on-primary-fixed">
+              {test.subject || test.examCategory || 'Standard Syllabus'}
             </span>
           </div>
 
-          {/* Proper Syllabus Box Content */}
-          <div className="p-6 space-y-5">
+          <div className="p-5 space-y-4">
             {test.syllabus ? (
-              <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 text-xs sm:text-sm text-slate-800 leading-relaxed whitespace-pre-line font-medium">
+              <div className="p-4 bg-surface-container-low rounded-xl text-xs sm:text-sm text-on-surface leading-relaxed whitespace-pre-line font-medium">
                 {test.syllabus}
               </div>
             ) : (
-              <div className="space-y-4">
-                <p className="text-xs sm:text-sm text-slate-600 leading-relaxed">
-                  This examination tests candidates across standard competitive exam modules. Questions in this test paper are sampled according to the following subject topics:
-                </p>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
-                  {defaultSyllabusTopics.map((item, idx) => (
-                    <div
-                      key={idx}
-                      className="p-4 rounded-2xl bg-indigo-50/50 border border-indigo-100/80 space-y-1.5 transition-all hover:bg-indigo-50"
-                    >
-                      <div className="flex items-center gap-2">
-                        <span className="w-5 h-5 rounded-full bg-indigo-600 text-white text-[11px] font-black flex items-center justify-center shrink-0">
-                          {idx + 1}
-                        </span>
-                        <h3 className="font-bold text-slate-900 text-xs sm:text-sm">
-                          {item.title}
-                        </h3>
-                      </div>
-                      <p className="text-xs text-slate-600 pl-7 leading-relaxed">
-                        {item.topics}
-                      </p>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {defaultSyllabusTopics.map((item, idx) => (
+                  <div
+                    key={idx}
+                    className="p-3.5 rounded-xl bg-surface-container-low space-y-1"
+                  >
+                    <div className="flex items-center gap-2">
+                      <span className="w-5 h-5 rounded-full bg-primary text-on-primary text-[10px] font-headline font-bold flex items-center justify-center shrink-0">
+                        {idx + 1}
+                      </span>
+                      <h3 className="font-headline font-bold text-on-surface text-xs sm:text-sm">
+                        {item.title}
+                      </h3>
                     </div>
-                  ))}
-                </div>
+                    <p className="text-xs text-on-surface-variant pl-7 leading-relaxed">
+                      {item.topics}
+                    </p>
+                  </div>
+                ))}
               </div>
             )}
-
-            {/* Syllabus summary notice inside box */}
-            <div className="p-3.5 bg-blue-50/80 rounded-2xl border border-blue-200/80 flex items-start gap-3 text-xs text-blue-900">
-              <Shield className="w-4 h-4 text-blue-700 shrink-0 mt-0.5" />
-              <div>
-                <span className="font-bold text-blue-950">Standardized Assessment Policy: </span>
-                <span>
-                  All questions adhere to official competitive exam standards with randomized options sequence to ensure fair reattempt assessment.
-                </span>
-              </div>
-            </div>
           </div>
         </div>
 
-        {/* Examination Guidelines & Reattempt Rules Box */}
-        <div className="bg-white rounded-3xl border border-slate-200 shadow-xs p-6 space-y-4">
-          <div className="flex items-center gap-2 pb-2 border-b border-slate-100">
-            <HelpCircle className="w-5 h-5 text-indigo-600" />
-            <h3 className="font-bold text-slate-900 text-sm sm:text-base">
-              {selectedLanguage === 'detailed'
-                ? 'Important Instructions & Assessment Rules'
-                : selectedLanguage === 'simplified'
-                ? 'Quick Test Rules'
-                : 'Examination Guidelines & Instructions'}
+        {/* Examination Guidelines & Declaration */}
+        <div className="bg-surface-container-lowest rounded-2xl border border-outline-variant/20 shadow-2xs p-5 space-y-4">
+          <div className="flex items-center gap-2 pb-2 border-b border-outline-variant/15">
+            <HelpCircle className="w-4 h-4 text-primary" />
+            <h3 className="font-headline font-bold text-on-surface text-sm">
+              Examination Guidelines &amp; Instructions
             </h3>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs text-slate-700">
-            <div className="flex items-start gap-2.5 p-3 rounded-xl bg-slate-50 border border-slate-200/70">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs text-on-surface-variant">
+            <div className="flex items-start gap-2.5 p-3 rounded-xl bg-surface-container-low">
               <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
               <div>
-                <span className="font-bold text-slate-900">Independent Reattempt Recording: </span>
-                <span>
-                  This reattempt will be recorded as an independent submission with its own scorecard. All past attempt scores remain safely stored.
-                </span>
+                <strong className="text-on-surface">Independent Attempt Recording: </strong>
+                This attempt is recorded independently with its own Result Summary and Answer Key.
               </div>
             </div>
 
-            <div className="flex items-start gap-2.5 p-3 rounded-xl bg-slate-50 border border-slate-200/70">
+            <div className="flex items-start gap-2.5 p-3 rounded-xl bg-surface-container-low">
               <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
               <div>
-                <span className="font-bold text-slate-900">Timed Countdown: </span>
-                <span>
-                  You will have {test.durationMinutes} minutes. The clock will begin immediately upon clicking Start Test.
-                </span>
-              </div>
-            </div>
-
-            <div className="flex items-start gap-2.5 p-3 rounded-xl bg-slate-50 border border-slate-200/70">
-              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
-              <div>
-                <span className="font-bold text-slate-900">Negative Marks Reminder: </span>
-                <span>
-                  {hasNegativeMarking
-                    ? `Be careful with uncertain questions. An incorrect choice deducts ${test.negativeMarks} marks.`
-                    : 'There is zero negative deduction. It is recommended to attempt all questions.'}
-                </span>
-              </div>
-            </div>
-
-            <div className="flex items-start gap-2.5 p-3 rounded-xl bg-slate-50 border border-slate-200/70">
-              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
-              <div>
-                <span className="font-bold text-slate-900">Navigation & Review: </span>
-                <span>
-                  You can freely navigate between questions, change your selected choices, and mark questions for later review before final submission.
-                </span>
+                <strong className="text-on-surface">Bilingual Toggle: </strong>
+                You can switch between English, Hindi, or Bilingual view anytime during the test.
               </div>
             </div>
           </div>
 
-          {/* Student Declaration & Agreement Checkbox */}
-          <div className="pt-2">
-            <label className="flex items-start gap-3 p-4 rounded-2xl bg-indigo-50/70 border border-indigo-200/80 cursor-pointer select-none transition-all hover:bg-indigo-50">
-              <input
-                type="checkbox"
-                checked={hasAgreed}
-                onChange={(e) => setHasAgreed(e.target.checked)}
-                className="mt-0.5 w-4 h-4 text-indigo-600 rounded border-slate-300 focus:ring-indigo-500 cursor-pointer"
-              />
-              <div className="space-y-0.5">
-                <span className="text-xs sm:text-sm font-bold text-slate-900 block">
-                  I have read and understood all the test rules, time duration, negative marking, and syllabus.
-                </span>
-                <span className="text-[11px] text-slate-600 block">
-                  I confirm that I am ready to start my reattempt under timed examination conditions.
-                </span>
-              </div>
-            </label>
-          </div>
+          <label className="flex items-start gap-3 p-4 rounded-xl bg-primary-fixed/40 border border-primary/20 cursor-pointer select-none transition-all">
+            <input
+              type="checkbox"
+              checked={hasAgreed}
+              onChange={(e) => setHasAgreed(e.target.checked)}
+              className="mt-0.5 w-4 h-4 accent-primary rounded cursor-pointer"
+            />
+            <div className="space-y-0.5">
+              <span className="font-headline text-xs sm:text-sm font-bold text-on-surface block">
+                I have read and understood all test rules, time duration, and negative marking.
+              </span>
+              <span className="text-[11px] text-on-surface-variant block">
+                I confirm that I am ready to start my examination under timed conditions.
+              </span>
+            </div>
+          </label>
         </div>
 
-        {/* Action Buttons Bar */}
-        <div className="flex flex-col sm:flex-row items-center justify-between gap-4 pt-2 pb-8">
+        {/* Action Buttons */}
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-1 pb-8">
           <button
             type="button"
             onClick={onCancel}
-            className="w-full sm:w-auto px-6 py-3 rounded-2xl border border-slate-300 bg-white hover:bg-slate-100 text-slate-700 font-bold text-sm cursor-pointer transition-colors shadow-xs"
+            className="w-full sm:w-auto px-6 py-3 rounded-xl bg-surface-container-low hover:bg-surface-container text-on-surface font-headline font-bold text-xs sm:text-sm cursor-pointer transition-colors"
           >
-            Cancel & Return to Portal
+            Cancel &amp; Return
           </button>
 
           <button
             type="button"
             onClick={() => onStartExam(test)}
             disabled={!hasAgreed}
-            className={`w-full sm:w-auto px-8 py-3.5 rounded-2xl font-black text-sm sm:text-base flex items-center justify-center gap-2.5 transition-all shadow-md cursor-pointer ${
+            className={`w-full sm:w-auto px-8 py-3.5 rounded-xl font-headline font-bold text-sm flex items-center justify-center gap-2 transition-all shadow-sm cursor-pointer ${
               hasAgreed
-                ? 'bg-linear-to-r from-emerald-600 via-teal-600 to-indigo-700 hover:from-emerald-700 hover:to-indigo-800 text-white hover:shadow-lg active:scale-98'
-                : 'bg-slate-200 text-slate-400 cursor-not-allowed border border-slate-300'
+                ? 'bg-linear-to-r from-primary to-primary-container text-on-primary active:scale-98'
+                : 'bg-surface-container-highest text-outline cursor-not-allowed'
             }`}
           >
             <span>Start Test Now</span>
-            <ArrowRight className="w-5 h-5" />
+            <ArrowRight className="w-4 h-4" />
           </button>
         </div>
       </main>

@@ -1,1 +1,71 @@
 @import "tailwindcss";
+
+@theme {
+  --font-headline: "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-body: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+
+  --color-surface: #fbf8ff;
+  --color-surface-dim: #dad9e6;
+  --color-surface-bright: #fbf8ff;
+  --color-surface-container-lowest: #ffffff;
+  --color-surface-container-low: #f4f2ff;
+  --color-surface-container: #eeecfa;
+  --color-surface-container-high: #e8e7f4;
+  --color-surface-container-highest: #e2e1ee;
+  --color-surface-variant: #e2e1ee;
+  --color-surface-tint: #2049ed;
+
+  --color-primary: #0035d2;
+  --color-primary-container: #2950f3;
+  --color-primary-fixed: #dee1ff;
+  --color-primary-fixed-dim: #bac3ff;
+  --color-on-primary: #ffffff;
+  --color-on-primary-container: #e3e5ff;
+  --color-on-primary-fixed: #001159;
+  --color-on-primary-fixed-variant: #0031c4;
+
+  --color-secondary: #4b59a1;
+  --color-secondary-container: #a1affd;
+  --color-secondary-fixed: #dee1ff;
+  --color-secondary-fixed-dim: #bac3ff;
+  --color-on-secondary: #ffffff;
+  --color-on-secondary-container: #313f86;
+  --color-on-secondary-fixed: #001159;
+  --color-on-secondary-fixed-variant: #334187;
+
+  --color-tertiary: #8c2a00;
+  --color-tertiary-container: #b53900;
+  --color-tertiary-fixed: #ffdbd0;
+  --color-tertiary-fixed-dim: #ffb59d;
+  --color-on-tertiary: #ffffff;
+  --color-on-tertiary-container: #ffddd2;
+  --color-on-tertiary-fixed: #390c00;
+  --color-on-tertiary-fixed-variant: #7f2500;
+
+  --color-error: #ba1a1a;
+  --color-error-container: #ffdad6;
+  --color-on-error: #ffffff;
+  --color-on-error-container: #93000a;
+
+  --color-on-surface: #1a1b24;
+  --color-on-surface-variant: #444656;
+  --color-outline: #747687;
+  --color-outline-variant: #c4c5d9;
+  --color-inverse-surface: #2f303a;
+  --color-inverse-on-surface: #f1effd;
+  --color-inverse-primary: #bac3ff;
+}
+
+@layer utilities {
+  .tabular-nums {
+    font-variant-numeric: tabular-nums;
+  }
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+}

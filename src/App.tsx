@@ -7,6 +7,7 @@ import { AccessExamModal } from './features/student/AccessExamModal';
 import { WaitingRoom } from './features/student/WaitingRoom';
 import { LiveExamScreen } from './features/student/LiveExamScreen';
 import { StudentResultView } from './features/student/StudentResultView';
+import { StudentAnswerKeyView } from './features/student/StudentAnswerKeyView';
 import { StudentHome } from './features/student/StudentHome';
 
 import { AdminLayout } from './features/admin/AdminLayout';
@@ -338,34 +339,51 @@ function MainApp() {
   }
 
   // -------------------------------------------------------------
-  // RENDER: Student Result Screen
+  // RENDER: Separate Answer Key & Solutions Screen
+  // -------------------------------------------------------------
+  if (currentView === 'student-answer-key' && activeAttempt) {
+    return (
+      <StudentAnswerKeyView
+        attempt={activeAttempt}
+        onBackToResultSummary={() => {
+          setCurrentView('student-result');
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        }}
+        onBackToPortal={() => {
+          setActiveAttempt(null);
+          setActiveTest(null);
+          setCurrentView(user ? (role === 'admin' ? 'admin' : 'student-home') : 'student-home');
+        }}
+      />
+    );
+  }
+
+  // -------------------------------------------------------------
+  // RENDER: Student Result Summary Screen (Separate from Answer Key)
   // Accessible without login for direct exam link candidates
   // -------------------------------------------------------------
   if (currentView === 'student-result' && activeAttempt) {
     return (
-      <>
-        {user && (
-          <Navbar
-            currentView={currentView}
-            onNavigate={(view) => setCurrentView(view)}
-            onOpenJoinModal={() => {
-              setPreselectedTestForJoin(null);
-              setIsJoinModalOpen(true);
-            }}
-          />
-        )}
-        <StudentResultView
-          attempt={activeAttempt}
-          onBackToPortal={() => {
-            setActiveAttempt(null);
-            setActiveTest(null);
-            setCurrentView(user ? (role === 'admin' ? 'admin' : 'student-home') : 'student-home');
-          }}
-          onReattempt={(testToReattempt) => {
-            handleOpenReattemptInstructions(testToReattempt, candidateName || user?.name || 'Candidate');
-          }}
-        />
-      </>
+      <StudentResultView
+        attempt={activeAttempt}
+        initialShowAnswerKey={false}
+        onOpenAnswerKey={(att) => {
+          setActiveAttempt(att);
+          setCurrentView('student-answer-key');
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        }}
+        onBackToPortal={() => {
+          setActiveAttempt(null);
+          setActiveTest(null);
+          setCurrentView(user ? (role === 'admin' ? 'admin' : 'student-home') : 'student-home');
+        }}
+        onReattempt={(testToReattempt) => {
+          handleOpenReattemptInstructions(
+            testToReattempt,
+            candidateName || user?.name || 'Candidate'
+          );
+        }}
+      />
     );
   }
 
@@ -533,6 +551,10 @@ function MainApp() {
         onViewAttempt={(att) => {
           setActiveAttempt(att);
           setCurrentView('student-result');
+        }}
+        onOpenAnswerKey={(att) => {
+          setActiveAttempt(att);
+          setCurrentView('student-answer-key');
         }}
         onOpenJoinModal={() => {
           setPreselectedTestForJoin(null);
