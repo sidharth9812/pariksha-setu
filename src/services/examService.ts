@@ -609,12 +609,22 @@ export async function endExam(testId: string): Promise<void> {
   await updateTest(testId, {
     status: 'completed',
   });
+  try {
+    await recoverMissingAttemptsFromSessions(testId);
+  } catch (err) {
+    console.warn('recoverMissingAttemptsFromSessions on endExam warning:', err);
+  }
 }
 
 export async function publishTestResults(testId: string): Promise<void> {
   await updateTest(testId, {
     status: 'result_published',
   });
+  try {
+    await recoverMissingAttemptsFromSessions(testId);
+  } catch (err) {
+    console.warn('recoverMissingAttemptsFromSessions on publishTestResults warning:', err);
+  }
 }
 
 /**
@@ -960,24 +970,58 @@ export async function joinExamSession(
   const sessionId = `${testId}_${student.uid}`;
   const now = new Date().toISOString();
 
-  const session: ExamSession = {
-    id: sessionId,
-    testId,
-    studentId: student.uid,
-    studentName: student.name,
-    studentEmail: student.email,
-    status: 'waiting',
-    joinedAt: now,
-    lastHeartbeat: now,
-    tabSwitchCount: 0,
-    activityLogs: [
-      {
-        timestamp: now,
-        event: 'joined_waiting_room',
-        details: 'Student entered waiting room with verified password',
-      },
-    ],
+  let existingSession: ExamSession | null = null;
+  try {
+    const snap = await getDoc(doc(db, 'examSessions', sessionId));
+    if (snap.exists()) {
+      existingSession = { id: snap.id, ...snap.data() } as ExamSession;
+    }
+  } catch {
+    // ignore
+  }
+
+  if (!existingSession) {
+    const localSessions = getLocal<ExamSession[]>(LOCAL_SESSIONS_KEY, []);
+    existingSession = localSessions.find((s) => s.id === sessionId) || null;
+  }
+
+  const joinLog: ActivityLogEntry = {
+    timestamp: now,
+    event: 'joined_waiting_room',
+    details: 'Student entered waiting room with verified password',
   };
+
+  const session: ExamSession = existingSession
+    ? {
+        ...existingSession,
+        id: sessionId,
+        testId,
+        studentId: student.uid,
+        studentName: student.name || existingSession.studentName,
+        studentEmail: student.email || existingSession.studentEmail,
+        status:
+          existingSession.status === 'submitted' || existingSession.status === 'auto_submitted'
+            ? existingSession.status
+            : existingSession.status === 'in_progress'
+            ? 'in_progress'
+            : 'waiting',
+        joinedAt: existingSession.joinedAt || now,
+        lastHeartbeat: now,
+        tabSwitchCount: existingSession.tabSwitchCount || 0,
+        activityLogs: [...(existingSession.activityLogs || []), joinLog],
+      }
+    : {
+        id: sessionId,
+        testId,
+        studentId: student.uid,
+        studentName: student.name,
+        studentEmail: student.email,
+        status: 'waiting',
+        joinedAt: now,
+        lastHeartbeat: now,
+        tabSwitchCount: 0,
+        activityLogs: [joinLog],
+      };
 
   // Sync to local
   const sessions = getLocal<ExamSession[]>(LOCAL_SESSIONS_KEY, []);
@@ -995,6 +1039,85 @@ export async function joinExamSession(
   return session;
 }
 
+export async function getExamSession(
+  testId: string,
+  studentId: string
+): Promise<ExamSession | null> {
+  const sessionId = `${testId}_${studentId}`;
+  try {
+    const snap = await getDoc(doc(db, 'examSessions', sessionId));
+    if (snap.exists()) {
+      return { id: snap.id, ...snap.data() } as ExamSession;
+    }
+  } catch {
+    // ignore
+  }
+  const sessions = getLocal<ExamSession[]>(LOCAL_SESSIONS_KEY, []);
+  return sessions.find((s) => s.id === sessionId) || null;
+}
+
+export async function syncSessionProgress(
+  testId: string,
+  studentId: string,
+  progress: {
+    studentName?: string;
+    studentEmail?: string;
+    answers: Record<string, 'A' | 'B' | 'C' | 'D'>;
+    visitedQuestionIds?: string[];
+    markedForReviewIds?: string[];
+    tabSwitchCount?: number;
+    startedAt?: string;
+  }
+): Promise<void> {
+  if (!testId || !studentId) return;
+  const sessionId = `${testId}_${studentId}`;
+  const now = new Date().toISOString();
+  const answeredCount = Object.keys(progress.answers || {}).length;
+
+  const updates: Record<string, any> = {
+    id: sessionId,
+    testId,
+    studentId,
+    status: 'in_progress',
+    lastHeartbeat: now,
+    answers: progress.answers || {},
+    answeredCount,
+  };
+  if (progress.studentName) updates.studentName = progress.studentName;
+  if (progress.studentEmail) updates.studentEmail = progress.studentEmail;
+  if (progress.visitedQuestionIds) updates.visitedQuestionIds = progress.visitedQuestionIds;
+  if (progress.markedForReviewIds) updates.markedForReviewIds = progress.markedForReviewIds;
+  if (progress.tabSwitchCount !== undefined) updates.tabSwitchCount = progress.tabSwitchCount;
+  if (progress.startedAt) updates.startedAt = progress.startedAt;
+
+  // Update local cache
+  const sessions = getLocal<ExamSession[]>(LOCAL_SESSIONS_KEY, []);
+  const exists = sessions.some((s) => s.id === sessionId);
+  const newSessionFallback: ExamSession = {
+    id: sessionId,
+    testId,
+    studentId,
+    studentName: progress.studentName || 'Candidate',
+    studentEmail: progress.studentEmail || `${studentId}@candidate.pariksha`,
+    status: 'in_progress',
+    joinedAt: now,
+    tabSwitchCount: progress.tabSwitchCount || 0,
+    activityLogs: [],
+    ...updates,
+  };
+  const updated = exists
+    ? sessions.map((s) => (s.id === sessionId ? { ...s, ...updates } : s))
+    : [...sessions, newSessionFallback];
+  setLocal(LOCAL_SESSIONS_KEY, updated);
+
+  // Sync to Cloud Firestore so admin & auto-recovery always have live answers
+  try {
+    await setDoc(doc(db, 'examSessions', sessionId), sanitizeForFirestore(updates), { merge: true });
+  } catch (err) {
+    console.warn('Firestore syncSessionProgress fallback:', err);
+  }
+}
+
 export async function updateSessionStatus(
   testId: string,
   studentId: string,
@@ -1003,13 +1126,13 @@ export async function updateSessionStatus(
   logEntry?: ActivityLogEntry
 ): Promise<void> {
   const sessionId = `${testId}_${studentId}`;
+  const now = new Date().toISOString();
   const updates: any = {
     status,
-    lastHeartbeat: new Date().toISOString(),
+    lastHeartbeat: now,
   };
 
-  if (status === 'in_progress') updates.startedAt = new Date().toISOString();
-  if (status === 'submitted' || status === 'auto_submitted') updates.submittedAt = new Date().toISOString();
+  if (status === 'submitted' || status === 'auto_submitted') updates.submittedAt = now;
   if (tabSwitchCount !== undefined) updates.tabSwitchCount = tabSwitchCount;
 
   // Local cache
@@ -1018,7 +1141,12 @@ export async function updateSessionStatus(
     if (s.id === sessionId) {
       const logs = [...(s.activityLogs || [])];
       if (logEntry) logs.push(logEntry);
-      return { ...s, ...updates, activityLogs: logs };
+      return {
+        ...s,
+        ...updates,
+        startedAt: s.startedAt || (status === 'in_progress' ? now : undefined),
+        activityLogs: logs,
+      };
     }
     return s;
   });
@@ -1033,8 +1161,12 @@ export async function updateSessionStatus(
       const logs = [...(current.activityLogs || [])];
       if (logEntry) logs.push(logEntry);
       updates.activityLogs = logs;
+      if (status === 'in_progress' && !current.startedAt) {
+        updates.startedAt = now;
+      }
       await updateDoc(sessionRef, sanitizeForFirestore(updates));
     } else {
+      if (status === 'in_progress') updates.startedAt = now;
       await setDoc(sessionRef, sanitizeForFirestore(updates), { merge: true });
     }
   } catch (err) {
@@ -1529,13 +1661,20 @@ export async function findStudentAttempt(
       const saved1 = localStorage.getItem(`pariksha_attempt_${testId}`);
       if (saved1) {
         const parsed = JSON.parse(saved1) as StudentAttempt;
-        if (matchesAttempt(parsed)) return parsed;
+        if (matchesAttempt(parsed)) {
+          // Ensure this local attempt is synced to Cloud Firestore
+          setDoc(doc(db, 'attempts', parsed.id || `att-${testId}-${parsed.studentId}`), sanitizeForFirestore(parsed), { merge: true }).catch(() => {});
+          return parsed;
+        }
       }
       if (cleanIdent) {
         const saved2 = localStorage.getItem(`pariksha_attempt_${testId}_${cleanIdent}`);
         if (saved2) {
           const parsed = JSON.parse(saved2) as StudentAttempt;
-          if (matchesAttempt(parsed)) return parsed;
+          if (matchesAttempt(parsed)) {
+            setDoc(doc(db, 'attempts', parsed.id || `att-${testId}-${parsed.studentId}`), sanitizeForFirestore(parsed), { merge: true }).catch(() => {});
+            return parsed;
+          }
         }
       }
     } catch {
@@ -1577,13 +1716,263 @@ export async function findStudentAttempt(
     console.warn('Firestore findStudentAttempt query warning:', err);
   }
 
-  // 5. Check local attempts fallback
+  // 5. Check if student has unsubmitted answers in localStorage or examSessions for an ended/published test
+  if (cleanUid && tDirect && (tDirect.status === 'completed' || tDirect.status === 'result_published' || tDirect.status === 'released')) {
+    try {
+      if (typeof window !== 'undefined') {
+        const rawAnswers = localStorage.getItem(`pariksha_answers_${resolvedId}_${cleanUid}`);
+        if (rawAnswers) {
+          const parsedAnswers = JSON.parse(rawAnswers) as Record<string, 'A' | 'B' | 'C' | 'D'>;
+          if (parsedAnswers && Object.keys(parsedAnswers).length > 0) {
+            const rawVisited = localStorage.getItem(`pariksha_visited_${resolvedId}_${cleanUid}`);
+            const rawReview = localStorage.getItem(`pariksha_reviews_${resolvedId}_${cleanUid}`);
+            const rawTabs = localStorage.getItem(`pariksha_tab_switches_${resolvedId}_${cleanUid}`);
+            const recovered = await submitExamAttempt({
+              testId: resolvedId,
+              studentId: cleanUid,
+              studentName: candidateIdentifier || 'Candidate',
+              studentEmail: `${cleanUid}@candidate.pariksha`,
+              answers: parsedAnswers,
+              visitedQuestionIds: rawVisited ? JSON.parse(rawVisited) : Object.keys(parsedAnswers),
+              markedForReviewIds: rawReview ? JSON.parse(rawReview) : [],
+              startedAt: tDirect.examStartTime || new Date().toISOString(),
+              isAutoSubmitted: true,
+              tabSwitchCount: rawTabs ? parseInt(rawTabs, 10) || 0 : 0,
+            });
+            localStorage.removeItem(`pariksha_answers_${resolvedId}_${cleanUid}`);
+            return recovered;
+          }
+        }
+      }
+      const session = await getExamSession(resolvedId, cleanUid);
+      if (session && session.answers && Object.keys(session.answers).length > 0) {
+        const recovered = await submitExamAttempt({
+          testId: resolvedId,
+          studentId: session.studentId,
+          studentName: session.studentName || candidateIdentifier || 'Candidate',
+          studentEmail: session.studentEmail || `${cleanUid}@candidate.pariksha`,
+          answers: session.answers,
+          visitedQuestionIds: session.visitedQuestionIds || Object.keys(session.answers),
+          markedForReviewIds: session.markedForReviewIds || [],
+          startedAt: session.startedAt || session.joinedAt || new Date().toISOString(),
+          isAutoSubmitted: true,
+          tabSwitchCount: session.tabSwitchCount || 0,
+          activityLogs: session.activityLogs || [],
+        });
+        return recovered;
+      }
+    } catch (e) {
+      console.warn('Auto-recovery in findStudentAttempt warning:', e);
+    }
+  }
+
+  // 6. Check local attempts fallback
   const localAttempts = getLocal<StudentAttempt[]>(LOCAL_ATTEMPTS_KEY, []);
   const localMatch = localAttempts.find(matchesAttempt);
+  if (localMatch) {
+    setDoc(doc(db, 'attempts', localMatch.id || `att-${testId}-${localMatch.studentId}`), sanitizeForFirestore(localMatch), { merge: true }).catch(() => {});
+  }
   return localMatch || null;
 }
 
+/**
+ * Automatically evaluates and creates missing attempt records in Firestore
+ * for any examSession that recorded live student answers when the test is completed/published.
+ */
+export async function recoverMissingAttemptsFromSessions(testId: string): Promise<StudentAttempt[]> {
+  const recoveredList: StudentAttempt[] = [];
+  if (!testId) return recoveredList;
+
+  try {
+    const test = await getTestById(testId);
+    if (!test) return recoveredList;
+
+    const isEnded =
+      test.status === 'completed' ||
+      test.status === 'result_published' ||
+      test.status === 'released';
+
+    const [sessSnap, attSnap] = await Promise.all([
+      getDocs(query(collection(db, 'examSessions'), where('testId', '==', testId))),
+      getDocs(query(collection(db, 'attempts'), where('testId', '==', testId))),
+    ]);
+
+    const existingStudentIds = new Set(attSnap.docs.map((d) => (d.data() as StudentAttempt).studentId));
+
+    for (const sDoc of sessSnap.docs) {
+      const s = { id: sDoc.id, ...sDoc.data() } as ExamSession;
+      if (!s.studentId || existingStudentIds.has(s.studentId)) continue;
+
+      const hasSavedAnswers = s.answers && Object.keys(s.answers).length > 0;
+      const isMarkedSubmitted = s.status === 'submitted' || s.status === 'auto_submitted';
+
+      if (hasSavedAnswers && (isEnded || isMarkedSubmitted)) {
+        const attempt = await submitExamAttempt({
+          testId,
+          studentId: s.studentId,
+          studentName: s.studentName || 'Candidate',
+          studentEmail: s.studentEmail || `${s.studentId}@candidate.pariksha`,
+          answers: s.answers || {},
+          visitedQuestionIds: s.visitedQuestionIds || Object.keys(s.answers || {}),
+          markedForReviewIds: s.markedForReviewIds || [],
+          startedAt: s.startedAt || s.joinedAt || new Date().toISOString(),
+          isAutoSubmitted: s.status !== 'submitted',
+          tabSwitchCount: s.tabSwitchCount || 0,
+          activityLogs: s.activityLogs || [],
+        });
+        existingStudentIds.add(s.studentId);
+        recoveredList.push(attempt);
+      }
+    }
+  } catch (err) {
+    console.warn('recoverMissingAttemptsFromSessions warning:', err);
+  }
+
+  return recoveredList;
+}
+
+/**
+ * Runs on student device startup to sync any locally cached attempts or
+ * auto-submit unfinished localStorage answers for tests that have already ended.
+ */
+export async function recoverStudentLocalExamAttempts(
+  studentId: string,
+  studentName: string,
+  studentEmail?: string
+): Promise<number> {
+  if (typeof window === 'undefined' || !studentId) return 0;
+  let recoveredCount = 0;
+
+  try {
+    // 1. Sync pending IndexedDB offline attempts
+    try {
+      const { syncPendingOfflineAttempts } = await import('./offlineStorageService');
+      const res = await syncPendingOfflineAttempts();
+      recoveredCount += res.syncedCount || 0;
+    } catch {
+      // ignore
+    }
+
+    // 2. Check all tests to see if student has local attempt or unsubmitted answers for an ended exam
+    const tests = await getTests();
+    const existingAttempts = await getAllAttempts();
+    const myFirestoreTestIds = new Set(
+      existingAttempts
+        .filter((a) => a.studentId === studentId || (studentName && a.studentName?.toLowerCase().trim() === studentName.toLowerCase().trim()))
+        .map((a) => a.testId)
+    );
+
+    // Sync any local cached attempts in LOCAL_ATTEMPTS_KEY that aren't in Firestore
+    const localCached = getLocal<StudentAttempt[]>(LOCAL_ATTEMPTS_KEY, []);
+    for (const locAtt of localCached) {
+      if (locAtt.studentId === studentId && !myFirestoreTestIds.has(locAtt.testId)) {
+        const docId = locAtt.id || `att-${locAtt.testId}-${studentId}`;
+        await setDoc(doc(db, 'attempts', docId), sanitizeForFirestore({ ...locAtt, id: docId, synced: true }), { merge: true });
+        await recordUserExamSubmission({
+          userId: studentId,
+          testId: locAtt.testId,
+          finalScore: locAtt.finalScore,
+          percentage: locAtt.percentage,
+        });
+        myFirestoreTestIds.add(locAtt.testId);
+        recoveredCount++;
+      }
+    }
+
+    for (const t of tests) {
+      // Check direct localStorage attempt key `pariksha_attempt_${t.id}`
+      const savedDirect = localStorage.getItem(`pariksha_attempt_${t.id}`);
+      if (savedDirect && !myFirestoreTestIds.has(t.id)) {
+        try {
+          const parsed = JSON.parse(savedDirect) as StudentAttempt;
+          if (parsed && (parsed.studentId === studentId || parsed.studentName?.toLowerCase().trim() === studentName.toLowerCase().trim())) {
+            const docId = parsed.id || `att-${t.id}-${studentId}`;
+            await setDoc(doc(db, 'attempts', docId), sanitizeForFirestore({ ...parsed, id: docId, studentId, synced: true }), { merge: true });
+            await recordUserExamSubmission({
+              userId: studentId,
+              testId: t.id,
+              finalScore: parsed.finalScore,
+              percentage: parsed.percentage,
+            });
+            myFirestoreTestIds.add(t.id);
+            recoveredCount++;
+            continue;
+          }
+        } catch {
+          // ignore
+        }
+      }
+
+      // Check unsubmitted in-progress answers for completed/published/released tests
+      const isTestFinished =
+        t.status === 'completed' || t.status === 'result_published' || t.status === 'released';
+      if (isTestFinished && !myFirestoreTestIds.has(t.id)) {
+        let matchedAnswerKey = `pariksha_answers_${t.id}_${studentId}`;
+        let rawAnswers = localStorage.getItem(matchedAnswerKey);
+        let keySuffix = studentId;
+
+        // Also scan localStorage for any pariksha_answers_<testId>_* key on this device
+        if (!rawAnswers) {
+          for (let i = 0; i < localStorage.length; i++) {
+            const k = localStorage.key(i);
+            const prefix = `pariksha_answers_${t.id}_`;
+            if (k && k.startsWith(prefix)) {
+              const candidateVal = localStorage.getItem(k);
+              if (candidateVal && candidateVal !== '{}') {
+                matchedAnswerKey = k;
+                rawAnswers = candidateVal;
+                keySuffix = k.slice(prefix.length);
+                break;
+              }
+            }
+          }
+        }
+
+        if (rawAnswers) {
+          try {
+            const parsedAnswers = JSON.parse(rawAnswers) as Record<string, 'A' | 'B' | 'C' | 'D'>;
+            if (parsedAnswers && Object.keys(parsedAnswers).length > 0) {
+              const rawVisited = localStorage.getItem(`pariksha_visited_${t.id}_${keySuffix}`);
+              const rawReview = localStorage.getItem(`pariksha_reviews_${t.id}_${keySuffix}`);
+              const rawTabs = localStorage.getItem(`pariksha_tab_switches_${t.id}_${keySuffix}`);
+              await submitExamAttempt({
+                testId: t.id,
+                studentId,
+                studentName: studentName || 'Candidate',
+                studentEmail: studentEmail || `${studentId}@candidate.pariksha`,
+                answers: parsedAnswers,
+                visitedQuestionIds: rawVisited ? JSON.parse(rawVisited) : Object.keys(parsedAnswers),
+                markedForReviewIds: rawReview ? JSON.parse(rawReview) : [],
+                startedAt: t.examStartTime || new Date().toISOString(),
+                isAutoSubmitted: true,
+                tabSwitchCount: rawTabs ? parseInt(rawTabs, 10) || 0 : 0,
+              });
+              localStorage.removeItem(matchedAnswerKey);
+              localStorage.removeItem(`pariksha_visited_${t.id}_${keySuffix}`);
+              localStorage.removeItem(`pariksha_reviews_${t.id}_${keySuffix}`);
+              localStorage.removeItem(`pariksha_tab_switches_${t.id}_${keySuffix}`);
+              myFirestoreTestIds.add(t.id);
+              recoveredCount++;
+            }
+          } catch {
+            // ignore
+          }
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('recoverStudentLocalExamAttempts warning:', err);
+  }
+
+  return recoveredCount;
+}
+
 export async function getTestAttempts(testId: string): Promise<StudentAttempt[]> {
+  try {
+    await recoverMissingAttemptsFromSessions(testId);
+  } catch {
+    // ignore
+  }
   try {
     const q = query(collection(db, 'attempts'), where('testId', '==', testId));
     const snap = await getDocs(q);

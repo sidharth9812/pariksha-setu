@@ -24,6 +24,8 @@ import {
   getQuestionsForTest,
   submitExamAttempt,
   updateSessionStatus,
+  syncSessionProgress,
+  getExamSession,
   subscribeToTest,
   findStudentAttempt,
 } from '../../services/examService';
@@ -161,6 +163,29 @@ export const LiveExamScreen: React.FC<LiveExamScreenProps> = ({
   });
 
   const startTimeRef = useRef<string>(new Date().toISOString());
+  const isSubmittingRef = useRef<boolean>(false);
+  const answersRef = useRef<Record<string, 'A' | 'B' | 'C' | 'D'>>(answers);
+  const visitedRef = useRef<string[]>(visited);
+  const markedForReviewRef = useRef<string[]>(markedForReview);
+  const tabSwitchCountRef = useRef<number>(tabSwitchCount);
+  const activityLogsRef = useRef<ActivityLogEntry[]>(activityLogs);
+
+  useEffect(() => {
+    answersRef.current = answers;
+  }, [answers]);
+  useEffect(() => {
+    visitedRef.current = visited;
+  }, [visited]);
+  useEffect(() => {
+    markedForReviewRef.current = markedForReview;
+  }, [markedForReview]);
+  useEffect(() => {
+    tabSwitchCountRef.current = tabSwitchCount;
+  }, [tabSwitchCount]);
+  useEffect(() => {
+    activityLogsRef.current = activityLogs;
+  }, [activityLogs]);
+
   const headerRef = useRef<HTMLElement>(null);
   const [headerHeight, setHeaderHeight] = useState<number>(88);
 
@@ -199,17 +224,32 @@ export const LiveExamScreen: React.FC<LiveExamScreenProps> = ({
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }, [currentIndex]);
 
-  // Load questions
+  // Load questions & restore any cloud session answers if local cache was cleared
   useEffect(() => {
     async function loadExamQuestions() {
       setLoading(true);
       try {
-        const qList = await getQuestionsForTest(test.id, 'student');
+        const [qList, existingSession] = await Promise.all([
+          getQuestionsForTest(test.id, 'student'),
+          getExamSession(test.id, effectiveStudentId),
+        ]);
         setQuestions(qList);
+
+        if (
+          existingSession?.answers &&
+          Object.keys(existingSession.answers).length > 0 &&
+          Object.keys(answersRef.current).length === 0
+        ) {
+          setAnswers(existingSession.answers);
+          answersRef.current = existingSession.answers;
+          localStorage.setItem(answersStorageKey, JSON.stringify(existingSession.answers));
+        }
+
         if (qList.length > 0) {
           const firstQId = qList[0].id;
           setVisited((prev) => {
             const next = Array.from(new Set([...prev, firstQId]));
+            visitedRef.current = next;
             localStorage.setItem(visitedStorageKey, JSON.stringify(next));
             return next;
           });
@@ -221,7 +261,7 @@ export const LiveExamScreen: React.FC<LiveExamScreenProps> = ({
       }
     }
     loadExamQuestions();
-  }, [test.id, visitedStorageKey]);
+  }, [test.id, visitedStorageKey, effectiveStudentId, answersStorageKey]);
 
   // Mark current question as visited
   useEffect(() => {
@@ -377,30 +417,60 @@ export const LiveExamScreen: React.FC<LiveExamScreenProps> = ({
   // Answer handler
   const handleSelectOption = (optionKey: 'A' | 'B' | 'C' | 'D') => {
     if (!currentQuestion) return;
-    const nextAnswers = { ...answers, [currentQuestion.id]: optionKey };
+    const nextAnswers = { ...answersRef.current, [currentQuestion.id]: optionKey };
+    answersRef.current = nextAnswers;
     setAnswers(nextAnswers);
     localStorage.setItem(answersStorageKey, JSON.stringify(nextAnswers));
+    syncSessionProgress(test.id, effectiveStudentId, {
+      studentName,
+      studentEmail,
+      answers: nextAnswers,
+      visitedQuestionIds: visitedRef.current,
+      markedForReviewIds: markedForReviewRef.current,
+      tabSwitchCount: tabSwitchCountRef.current,
+      startedAt: startTimeRef.current,
+    });
   };
 
   const handleClearResponse = () => {
     if (!currentQuestion) return;
-    const nextAnswers = { ...answers };
+    const nextAnswers = { ...answersRef.current };
     delete nextAnswers[currentQuestion.id];
+    answersRef.current = nextAnswers;
     setAnswers(nextAnswers);
     localStorage.setItem(answersStorageKey, JSON.stringify(nextAnswers));
+    syncSessionProgress(test.id, effectiveStudentId, {
+      studentName,
+      studentEmail,
+      answers: nextAnswers,
+      visitedQuestionIds: visitedRef.current,
+      markedForReviewIds: markedForReviewRef.current,
+      tabSwitchCount: tabSwitchCountRef.current,
+      startedAt: startTimeRef.current,
+    });
   };
 
   const handleToggleReview = () => {
     if (!currentQuestion) return;
     const qId = currentQuestion.id;
     let nextReviews: string[];
-    if (markedForReview.includes(qId)) {
-      nextReviews = markedForReview.filter((id) => id !== qId);
+    if (markedForReviewRef.current.includes(qId)) {
+      nextReviews = markedForReviewRef.current.filter((id) => id !== qId);
     } else {
-      nextReviews = [...markedForReview, qId];
+      nextReviews = [...markedForReviewRef.current, qId];
     }
+    markedForReviewRef.current = nextReviews;
     setMarkedForReview(nextReviews);
     localStorage.setItem(reviewStorageKey, JSON.stringify(nextReviews));
+    syncSessionProgress(test.id, effectiveStudentId, {
+      studentName,
+      studentEmail,
+      answers: answersRef.current,
+      visitedQuestionIds: visitedRef.current,
+      markedForReviewIds: nextReviews,
+      tabSwitchCount: tabSwitchCountRef.current,
+      startedAt: startTimeRef.current,
+    });
   };
 
   const handleSaveAndNext = () => {
@@ -423,23 +493,37 @@ export const LiveExamScreen: React.FC<LiveExamScreenProps> = ({
 
   // Submission handler
   const handleFinalSubmit = async (isAuto: boolean = false) => {
-    if (isSubmitting) return;
+    if (isSubmitting || isSubmittingRef.current) return;
+    isSubmittingRef.current = true;
     setIsSubmitting(true);
     setShowSubmitModal(false);
 
     try {
+      // Always read the latest answers from ref and localStorage backup so auto-submit never uses stale mount state
+      let latestAnswers = { ...answersRef.current };
+      if (Object.keys(latestAnswers).length === 0) {
+        try {
+          const savedRaw = localStorage.getItem(answersStorageKey);
+          if (savedRaw) {
+            latestAnswers = JSON.parse(savedRaw);
+          }
+        } catch {
+          // ignore
+        }
+      }
+
       const attempt = await submitExamAttempt({
         testId: test.id,
         studentId: effectiveStudentId,
         studentName,
         studentEmail,
-        answers,
-        visitedQuestionIds: visited,
-        markedForReviewIds: markedForReview,
+        answers: latestAnswers,
+        visitedQuestionIds: visitedRef.current,
+        markedForReviewIds: markedForReviewRef.current,
         startedAt: startTimeRef.current,
         isAutoSubmitted: isAuto,
-        tabSwitchCount,
-        activityLogs,
+        tabSwitchCount: tabSwitchCountRef.current,
+        activityLogs: activityLogsRef.current,
       });
 
       try {
@@ -460,6 +544,7 @@ export const LiveExamScreen: React.FC<LiveExamScreenProps> = ({
       onSubmitted(attempt);
     } catch (err) {
       console.error('Submission error:', err);
+      isSubmittingRef.current = false;
     } finally {
       setIsSubmitting(false);
     }

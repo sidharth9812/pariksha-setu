@@ -57,6 +57,7 @@ import {
   getSeriesList,
   getAllAttempts,
   subscribeToTestsList,
+  recoverStudentLocalExamAttempts,
 } from '../../services/examService';
 import { useAuth } from '../../context/AuthContext';
 import { useInstitute } from '../../context/InstituteContext';
@@ -274,6 +275,20 @@ export const StudentHome: React.FC<StudentHomeProps> = ({
     async function loadData() {
       setLoading(true);
       try {
+        const candUidInit =
+          user?.uid ||
+          (typeof window !== 'undefined' ? localStorage.getItem('pariksha_candidate_uid') || '' : '');
+        const candNameInit =
+          user?.name ||
+          (typeof window !== 'undefined'
+            ? localStorage.getItem('pariksha_candidate_name') || ''
+            : '');
+        const candEmailInit = user?.email || '';
+
+        if (candUidInit) {
+          await recoverStudentLocalExamAttempts(candUidInit, candNameInit, candEmailInit);
+        }
+
         const [tList, sList, allAtt, cList, dlTests, pAtts] = await Promise.all([
           getTests(),
           getSeriesList(),

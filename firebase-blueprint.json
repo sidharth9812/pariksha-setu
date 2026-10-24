@@ -126,7 +126,11 @@
         "submittedAt": { "type": "string" },
         "lastHeartbeat": { "type": "string" },
         "tabSwitchCount": { "type": "number" },
-        "activityLogs": { "type": "object" }
+        "activityLogs": { "type": "object" },
+        "answers": { "type": "object" },
+        "visitedQuestionIds": { "type": "object" },
+        "markedForReviewIds": { "type": "object" },
+        "answeredCount": { "type": "number" }
       },
       "required": ["testId", "studentId", "studentName", "status"]
     },

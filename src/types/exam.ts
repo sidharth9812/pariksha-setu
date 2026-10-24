@@ -157,6 +157,10 @@ export interface ExamSession {
   lastHeartbeat?: string;
   tabSwitchCount: number;
   activityLogs: ActivityLogEntry[];
+  answers?: Record<string, 'A' | 'B' | 'C' | 'D'>;
+  visitedQuestionIds?: string[];
+  markedForReviewIds?: string[];
+  answeredCount?: number;
 }
 
 export interface StudentAttempt {
