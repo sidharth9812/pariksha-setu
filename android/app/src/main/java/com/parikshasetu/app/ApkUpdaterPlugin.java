@@ -18,6 +18,11 @@ import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
 
+import org.json.JSONObject;
+
+import java.io.BufferedInputStream;
+import java.io.BufferedOutputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
@@ -25,6 +30,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.HashSet;
 import java.util.Locale;
@@ -32,6 +38,8 @@ import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Native Capacitor plugin for Option 1: In-App APK Download and Update.
@@ -52,14 +60,26 @@ public class ApkUpdaterPlugin extends Plugin {
     private static final String OFFICIAL_RELEASE_URL_PREFIX =
         "https://github.com/sidharth9812/pariksha-setu/releases/download/";
     private static final String UPDATES_SUBDIR = "apk_updates";
-    private static final int CONNECT_TIMEOUT_MS = 20000;
-    private static final int READ_TIMEOUT_MS = 30000;
+
+    private static final int CONNECT_TIMEOUT_MS = 15000;
+    private static final int READ_TIMEOUT_MS = 25000;
     private static final int MAX_REDIRECTS = 10;
+    private static final int MAX_AUTO_RETRIES = 2;
+
+    // 64 KB read buffer with 128 KB BufferedInputStream / BufferedOutputStream
+    private static final int STREAM_READ_BUFFER_BYTES = 64 * 1024;
+    private static final int FILE_IO_BUFFER_BYTES = 128 * 1024;
+    private static final long PARTIAL_FILE_MAX_AGE_MS = 24L * 60L * 60L * 1000L;
+
+    // Matches HTTP Content-Range header: "bytes start-end/total" or "bytes start-end/*"
+    private static final Pattern CONTENT_RANGE_PATTERN =
+        Pattern.compile("^bytes\\s+(\\d+)-(\\d+)/(\\d+|\\*)$", Pattern.CASE_INSENSITIVE);
 
     private final ExecutorService downloadExecutor = Executors.newSingleThreadExecutor();
     private final AtomicBoolean isCancelled = new AtomicBoolean(false);
     private final AtomicBoolean isDownloading = new AtomicBoolean(false);
     private volatile File lastDownloadedApk = null;
+    private volatile HttpURLConnection activeConnection = null;
 
     @PluginMethod
     public void checkInstallPermission(PluginCall call) {
@@ -101,6 +121,12 @@ public class ApkUpdaterPlugin extends Plugin {
     @PluginMethod
     public void cancelDownload(PluginCall call) {
         isCancelled.set(true);
+        HttpURLConnection conn = activeConnection;
+        if (conn != null) {
+            try {
+                conn.disconnect();
+            } catch (Exception ignored) {}
+        }
         JSObject ret = new JSObject();
         ret.put("cancelled", true);
         call.resolve(ret);
@@ -171,9 +197,7 @@ public class ApkUpdaterPlugin extends Plugin {
 
         downloadExecutor.execute(() -> {
             File partFile = null;
-            HttpURLConnection connection = null;
-            InputStream input = null;
-            FileOutputStream output = null;
+            File metaFile = null;
 
             try {
                 File updateDir = new File(getContext().getCacheDir(), UPDATES_SUBDIR);
@@ -183,68 +207,49 @@ public class ApkUpdaterPlugin extends Plugin {
 
                 File finalApkFile = new File(updateDir, safeFileName);
                 partFile = new File(updateDir, safeFileName + ".part");
+                metaFile = new File(updateDir, safeFileName + ".part.meta");
 
-                // Clean up stale partial files or old release APKs to save device space
-                cleanupOldFiles(updateDir, finalApkFile.getName());
-                if (partFile.exists()) {
-                    //noinspection ResultOfMethodCallIgnored
-                    partFile.delete();
+                // Clean up unrelated old releases while preserving current target APK and its resumable .part/.meta
+                cleanupOldFiles(updateDir, safeFileName);
+
+                // Fast-path: if the target APK is already completely downloaded and passes full verification, reuse it
+                if (finalApkFile.exists() && isValidApkZipFile(finalApkFile)) {
+                    try {
+                        verifyDownloadedApkArchive(finalApkFile);
+                        deleteQuietly(partFile);
+                        deleteQuietly(metaFile);
+                        lastDownloadedApk = finalApkFile;
+                        long existingSize = finalApkFile.length();
+                        emitProgress("completed", 100, existingSize, existingSize);
+                        completeInstallFlow(call, finalApkFile, existingSize);
+                        return;
+                    } catch (IOException invalidExisting) {
+                        deleteQuietly(finalApkFile);
+                    }
                 }
 
                 emitProgress("starting", 0, 0L, -1L);
 
-                connection = openHttpsConnectionWithRedirects(downloadUrl);
-                int responseCode = connection.getResponseCode();
-                if (responseCode != HttpURLConnection.HTTP_OK) {
-                    throw new IOException("Server returned HTTP " + responseCode + " while downloading update APK.");
-                }
-
-                long totalBytes = connection.getContentLengthLong();
-                input = connection.getInputStream();
-                output = new FileOutputStream(partFile);
-
-                byte[] buffer = new byte[16 * 1024];
-                long bytesDownloaded = 0L;
-                int bytesRead;
-                int lastEmittedPercent = -1;
-                long lastEmitTime = 0L;
-
-                while ((bytesRead = input.read(buffer)) != -1) {
-                    if (isCancelled.get()) {
-                        throw new InterruptedException("Download cancelled by user.");
-                    }
-
-                    output.write(buffer, 0, bytesRead);
-                    bytesDownloaded += bytesRead;
-
-                    long now = System.currentTimeMillis();
-                    int percent = totalBytes > 0
-                        ? (int) Math.min(100L, (bytesDownloaded * 100L) / totalBytes)
-                        : -1;
-
-                    if ((percent != lastEmittedPercent && now - lastEmitTime >= 120) || now - lastEmitTime >= 400) {
-                        lastEmittedPercent = percent;
-                        lastEmitTime = now;
-                        emitProgress("downloading", Math.max(0, percent), bytesDownloaded, totalBytes);
-                    }
-                }
-
-                output.flush();
-                output.close();
-                output = null;
-                input.close();
-                input = null;
-
-                if (totalBytes > 0 && bytesDownloaded < totalBytes) {
-                    throw new IOException("Incomplete APK download (" + bytesDownloaded + " of " + totalBytes + " bytes). Please check your internet connection and retry.");
-                }
+                long finalBytesDownloaded = executeDownloadWithResumeAndRetry(
+                    downloadUrl,
+                    partFile,
+                    metaFile
+                );
 
                 if (!isValidApkZipFile(partFile)) {
+                    deleteQuietly(partFile);
+                    deleteQuietly(metaFile);
                     throw new IOException("Downloaded file is not a valid Android APK package.");
                 }
 
                 // Verify packageId, versionCode, and signing certificate match before accepting the APK
-                verifyDownloadedApkArchive(partFile);
+                try {
+                    verifyDownloadedApkArchive(partFile);
+                } catch (IOException securityEx) {
+                    deleteQuietly(partFile);
+                    deleteQuietly(metaFile);
+                    throw securityEx;
+                }
 
                 if (finalApkFile.exists() && !finalApkFile.delete()) {
                     throw new IOException("Unable to replace previous APK file in cache.");
@@ -253,56 +258,278 @@ public class ApkUpdaterPlugin extends Plugin {
                 if (!partFile.renameTo(finalApkFile)) {
                     throw new IOException("Unable to finalize downloaded APK file.");
                 }
+                deleteQuietly(metaFile);
 
                 lastDownloadedApk = finalApkFile;
-                emitProgress("completed", 100, bytesDownloaded, totalBytes > 0 ? totalBytes : bytesDownloaded);
+                emitProgress("completed", 100, finalBytesDownloaded, finalBytesDownloaded);
 
-                if (!canRequestPackageInstalls()) {
-                    JSObject ret = new JSObject();
-                    ret.put("status", "PERMISSION_REQUIRED");
-                    ret.put("fileName", finalApkFile.getName());
-                    ret.put("bytesDownloaded", bytesDownloaded);
-                    ret.put("message", "APK downloaded and verified! Please allow 'Install unknown apps' for ParikshaSetu to complete the update.");
-                    call.resolve(ret);
-                    return;
-                }
-
-                launchPackageInstaller(finalApkFile);
-
-                JSObject ret = new JSObject();
-                ret.put("status", "INSTALLER_LAUNCHED");
-                ret.put("fileName", finalApkFile.getName());
-                ret.put("bytesDownloaded", bytesDownloaded);
-                call.resolve(ret);
+                completeInstallFlow(call, finalApkFile, finalBytesDownloaded);
 
             } catch (InterruptedException cancelledEx) {
-                if (partFile != null && partFile.exists()) {
-                    //noinspection ResultOfMethodCallIgnored
-                    partFile.delete();
-                }
+                deleteQuietly(partFile);
+                deleteQuietly(metaFile);
                 emitProgress("cancelled", 0, 0L, -1L);
                 call.reject("Update download was cancelled.");
             } catch (Exception e) {
-                if (partFile != null && partFile.exists()) {
-                    //noinspection ResultOfMethodCallIgnored
-                    partFile.delete();
-                }
                 emitProgress("error", 0, 0L, -1L);
                 String friendlyMsg = buildFriendlyErrorMessage(e);
                 call.reject(friendlyMsg, e);
             } finally {
+                activeConnection = null;
                 isDownloading.set(false);
-                try {
-                    if (output != null) output.close();
-                } catch (IOException ignored) {}
-                try {
-                    if (input != null) input.close();
-                } catch (IOException ignored) {}
-                if (connection != null) {
-                    connection.disconnect();
-                }
             }
         });
+    }
+
+    private void completeInstallFlow(PluginCall call, File finalApkFile, long bytesDownloaded) {
+        if (!canRequestPackageInstalls()) {
+            JSObject ret = new JSObject();
+            ret.put("status", "PERMISSION_REQUIRED");
+            ret.put("fileName", finalApkFile.getName());
+            ret.put("bytesDownloaded", bytesDownloaded);
+            ret.put("message", "APK downloaded and verified! Please allow 'Install unknown apps' for ParikshaSetu to complete the update.");
+            call.resolve(ret);
+            return;
+        }
+
+        launchPackageInstaller(finalApkFile);
+
+        JSObject ret = new JSObject();
+        ret.put("status", "INSTALLER_LAUNCHED");
+        ret.put("fileName", finalApkFile.getName());
+        ret.put("bytesDownloaded", bytesDownloaded);
+        call.resolve(ret);
+    }
+
+    /**
+     * Performs buffered streaming download with safe HTTP Range (206) resume support
+     * and automatic retry on transient mobile network interruptions.
+     */
+    private long executeDownloadWithResumeAndRetry(
+        String downloadUrl,
+        File partFile,
+        File metaFile
+    ) throws Exception {
+        Exception lastException = null;
+
+        for (int attempt = 0; attempt <= MAX_AUTO_RETRIES; attempt++) {
+            if (isCancelled.get()) {
+                throw new InterruptedException("Download cancelled by user.");
+            }
+
+            if (attempt > 0) {
+                // Brief pause before automatic retry on transient connection drop
+                long backoffMs = 800L * attempt;
+                long slept = 0L;
+                while (slept < backoffMs) {
+                    if (isCancelled.get()) {
+                        throw new InterruptedException("Download cancelled by user.");
+                    }
+                    Thread.sleep(100L);
+                    slept += 100L;
+                }
+            }
+
+            try {
+                return performSingleDownloadPass(downloadUrl, partFile, metaFile);
+            } catch (InterruptedException ie) {
+                throw ie;
+            } catch (IOException ioEx) {
+                lastException = ioEx;
+                if (isCancelled.get()) {
+                    throw new InterruptedException("Download cancelled by user.");
+                }
+                if (!isRetryableNetworkError(ioEx) || attempt == MAX_AUTO_RETRIES) {
+                    throw ioEx;
+                }
+            }
+        }
+
+        if (lastException != null) {
+            throw lastException;
+        }
+        throw new IOException("Failed to download update APK.");
+    }
+
+    private long performSingleDownloadPass(
+        String downloadUrl,
+        File partFile,
+        File metaFile
+    ) throws IOException, InterruptedException {
+        HttpURLConnection connection = null;
+        InputStream input = null;
+        BufferedOutputStream output = null;
+        FileOutputStream fileOut = null;
+
+        try {
+            PartialDownloadMeta meta = readPartialMeta(metaFile);
+            long existingBytes = 0L;
+            String ifRangeHeader = null;
+
+            if (partFile.exists()) {
+                long fileLen = partFile.length();
+                boolean isFresh = (System.currentTimeMillis() - partFile.lastModified()) <= PARTIAL_FILE_MAX_AGE_MS;
+                boolean urlMatches = meta != null && downloadUrl.equals(meta.downloadUrl);
+                boolean sizePlausible = meta != null && (meta.totalBytes <= 0 || fileLen <= meta.totalBytes);
+
+                if (fileLen > 0 && isFresh && urlMatches && sizePlausible) {
+                    if (meta.totalBytes > 0 && fileLen == meta.totalBytes && isValidApkZipFile(partFile)) {
+                        return fileLen;
+                    }
+                    existingBytes = fileLen;
+                    if (meta.etag != null && !meta.etag.isEmpty() && !meta.etag.startsWith("W/")) {
+                        ifRangeHeader = meta.etag;
+                    } else if (meta.lastModified != null && !meta.lastModified.isEmpty()) {
+                        ifRangeHeader = meta.lastModified;
+                    }
+                } else {
+                    // Stale or mismatched partial file: clean slate
+                    deleteQuietly(partFile);
+                    deleteQuietly(metaFile);
+                }
+            } else if (metaFile.exists()) {
+                deleteQuietly(metaFile);
+            }
+
+            connection = openHttpsConnectionWithRedirects(downloadUrl, existingBytes, ifRangeHeader);
+            activeConnection = connection;
+
+            int responseCode = connection.getResponseCode();
+
+            // If Range was not satisfiable (e.g., asset replaced or offset out of bounds), reset and retry cleanly from 0
+            if (responseCode == 416 && existingBytes > 0) {
+                connection.disconnect();
+                activeConnection = null;
+                deleteQuietly(partFile);
+                deleteQuietly(metaFile);
+                existingBytes = 0L;
+                connection = openHttpsConnectionWithRedirects(downloadUrl, 0L, null);
+                activeConnection = connection;
+                responseCode = connection.getResponseCode();
+            }
+
+            boolean appendMode = false;
+            long totalBytes = -1L;
+            long bytesDownloaded = 0L;
+
+            if (existingBytes > 0 && responseCode == HttpURLConnection.HTTP_PARTIAL) {
+                String contentRange = connection.getHeaderField("Content-Range");
+                ContentRangeInfo rangeInfo = parseContentRange(contentRange);
+
+                boolean rangeStartMatches = rangeInfo != null && rangeInfo.start == existingBytes;
+                boolean totalMatchesMeta = meta == null
+                    || meta.totalBytes <= 0
+                    || rangeInfo == null
+                    || rangeInfo.total <= 0
+                    || rangeInfo.total == meta.totalBytes;
+
+                if (rangeStartMatches && totalMatchesMeta) {
+                    appendMode = true;
+                    bytesDownloaded = existingBytes;
+                    if (rangeInfo.total > 0) {
+                        totalBytes = rangeInfo.total;
+                    } else {
+                        long rem = connection.getContentLengthLong();
+                        totalBytes = rem > 0 ? existingBytes + rem : (meta != null ? meta.totalBytes : -1L);
+                    }
+                } else {
+                    // Server returned an unexpected Content-Range; restart cleanly from 0 to avoid corruption
+                    connection.disconnect();
+                    activeConnection = null;
+                    deleteQuietly(partFile);
+                    deleteQuietly(metaFile);
+                    existingBytes = 0L;
+                    connection = openHttpsConnectionWithRedirects(downloadUrl, 0L, null);
+                    activeConnection = connection;
+                    responseCode = connection.getResponseCode();
+                }
+            }
+
+            if (!appendMode) {
+                if (responseCode != HttpURLConnection.HTTP_OK) {
+                    throw new IOException("Server returned HTTP " + responseCode + " while downloading update APK.");
+                }
+                // Never append a full HTTP 200 response to an existing partial file
+                bytesDownloaded = 0L;
+                totalBytes = connection.getContentLengthLong();
+            }
+
+            String responseEtag = connection.getHeaderField("ETag");
+            String responseLastModified = connection.getHeaderField("Last-Modified");
+            writePartialMeta(metaFile, downloadUrl, totalBytes, responseEtag, responseLastModified);
+
+            input = new BufferedInputStream(connection.getInputStream(), FILE_IO_BUFFER_BYTES);
+            fileOut = new FileOutputStream(partFile, appendMode);
+            output = new BufferedOutputStream(fileOut, FILE_IO_BUFFER_BYTES);
+
+            byte[] buffer = new byte[STREAM_READ_BUFFER_BYTES];
+            int bytesRead;
+            int lastEmittedPercent = -1;
+            long lastEmitTime = 0L;
+
+            if (bytesDownloaded > 0 && totalBytes > 0) {
+                int resumedPercent = (int) Math.min(99L, (bytesDownloaded * 100L) / totalBytes);
+                lastEmittedPercent = resumedPercent;
+                lastEmitTime = System.currentTimeMillis();
+                emitProgress("downloading", Math.max(0, resumedPercent), bytesDownloaded, totalBytes);
+            }
+
+            while ((bytesRead = input.read(buffer)) != -1) {
+                if (isCancelled.get()) {
+                    throw new InterruptedException("Download cancelled by user.");
+                }
+
+                output.write(buffer, 0, bytesRead);
+                bytesDownloaded += bytesRead;
+
+                long now = System.currentTimeMillis();
+                int percent = totalBytes > 0
+                    ? (int) Math.min(100L, (bytesDownloaded * 100L) / totalBytes)
+                    : -1;
+
+                if ((percent != lastEmittedPercent && now - lastEmitTime >= 150) || now - lastEmitTime >= 500) {
+                    lastEmittedPercent = percent;
+                    lastEmitTime = now;
+                    emitProgress("downloading", Math.max(0, percent), bytesDownloaded, totalBytes);
+                }
+            }
+
+            output.flush();
+            try {
+                fileOut.getFD().sync();
+            } catch (IOException ignored) {}
+            output.close();
+            output = null;
+            fileOut = null;
+            input.close();
+            input = null;
+
+            long actualFileLength = partFile.length();
+            if (totalBytes > 0 && (bytesDownloaded != totalBytes || actualFileLength != totalBytes)) {
+                throw new IOException(
+                    "Incomplete APK download (" + actualFileLength + " of " + totalBytes + " bytes). Retrying or resuming."
+                );
+            }
+
+            return actualFileLength;
+
+        } finally {
+            try {
+                if (output != null) {
+                    output.flush();
+                    output.close();
+                } else if (fileOut != null) {
+                    fileOut.close();
+                }
+            } catch (IOException ignored) {}
+            try {
+                if (input != null) input.close();
+            } catch (IOException ignored) {}
+            if (connection != null) {
+                connection.disconnect();
+            }
+            activeConnection = null;
+        }
     }
 
     private boolean isOfficialReleaseDownloadUrl(String urlStr) {
@@ -330,7 +557,11 @@ public class ApkUpdaterPlugin extends Plugin {
             || lower.endsWith(".githubusercontent.com");
     }
 
-    private HttpURLConnection openHttpsConnectionWithRedirects(String initialUrl) throws IOException {
+    private HttpURLConnection openHttpsConnectionWithRedirects(
+        String initialUrl,
+        long rangeOffset,
+        String ifRangeHeader
+    ) throws IOException {
         if (!isOfficialReleaseDownloadUrl(initialUrl)) {
             throw new IOException("Untrusted initial download URL blocked.");
         }
@@ -351,7 +582,18 @@ public class ApkUpdaterPlugin extends Plugin {
             conn.setUseCaches(false);
             conn.setRequestMethod("GET");
             conn.setRequestProperty("Accept", "application/vnd.android.package-archive, application/octet-stream, */*");
-            conn.setRequestProperty("User-Agent", "ParikshaSetu-Android-Updater/1.0");
+            // Prevent transparent gzip encoding on already-compressed APK archives so Content-Length and Range offsets remain exact
+            conn.setRequestProperty("Accept-Encoding", "identity");
+            conn.setRequestProperty("Connection", "keep-alive");
+            conn.setRequestProperty("User-Agent", "ParikshaSetu-Android-Updater/1.1");
+
+            if (rangeOffset > 0L) {
+                conn.setRequestProperty("Range", "bytes=" + rangeOffset + "-");
+                if (ifRangeHeader != null && !ifRangeHeader.isEmpty()) {
+                    conn.setRequestProperty("If-Range", ifRangeHeader);
+                }
+            }
+
             conn.connect();
 
             int status = conn.getResponseCode();
@@ -373,6 +615,125 @@ public class ApkUpdaterPlugin extends Plugin {
             return conn;
         }
         throw new IOException("Too many redirects while downloading APK.");
+    }
+
+    private static final class ContentRangeInfo {
+        final long start;
+        final long end;
+        final long total;
+
+        ContentRangeInfo(long start, long end, long total) {
+            this.start = start;
+            this.end = end;
+            this.total = total;
+        }
+    }
+
+    private ContentRangeInfo parseContentRange(String headerValue) {
+        if (headerValue == null || headerValue.trim().isEmpty()) {
+            return null;
+        }
+        Matcher m = CONTENT_RANGE_PATTERN.matcher(headerValue.trim());
+        if (!m.matches()) {
+            return null;
+        }
+        try {
+            long start = Long.parseLong(m.group(1));
+            long end = Long.parseLong(m.group(2));
+            String totalGroup = m.group(3);
+            long total = "*".equals(totalGroup) ? -1L : Long.parseLong(totalGroup);
+            if (start < 0 || end < start || (total > 0 && end >= total)) {
+                return null;
+            }
+            return new ContentRangeInfo(start, end, total);
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    private static final class PartialDownloadMeta {
+        final String downloadUrl;
+        final long totalBytes;
+        final String etag;
+        final String lastModified;
+
+        PartialDownloadMeta(String downloadUrl, long totalBytes, String etag, String lastModified) {
+            this.downloadUrl = downloadUrl;
+            this.totalBytes = totalBytes;
+            this.etag = etag;
+            this.lastModified = lastModified;
+        }
+    }
+
+    private PartialDownloadMeta readPartialMeta(File metaFile) {
+        if (metaFile == null || !metaFile.exists() || metaFile.length() <= 0 || metaFile.length() > 8192) {
+            return null;
+        }
+        try (FileInputStream fis = new FileInputStream(metaFile);
+             ByteArrayOutputStream bos = new ByteArrayOutputStream()) {
+            byte[] buf = new byte[512];
+            int r;
+            while ((r = fis.read(buf)) != -1) {
+                bos.write(buf, 0, r);
+            }
+            String raw = new String(bos.toByteArray(), StandardCharsets.UTF_8);
+            JSONObject obj = new JSONObject(raw);
+            String url = obj.optString("downloadUrl", "");
+            long totalBytes = obj.optLong("totalBytes", -1L);
+            String etag = obj.optString("etag", "");
+            String lastModified = obj.optString("lastModified", "");
+            if (url.isEmpty()) return null;
+            return new PartialDownloadMeta(url, totalBytes, etag, lastModified);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private void writePartialMeta(
+        File metaFile,
+        String downloadUrl,
+        long totalBytes,
+        String etag,
+        String lastModified
+    ) {
+        if (metaFile == null) return;
+        try {
+            JSONObject obj = new JSONObject();
+            obj.put("downloadUrl", downloadUrl);
+            obj.put("totalBytes", totalBytes);
+            obj.put("etag", etag != null ? etag : "");
+            obj.put("lastModified", lastModified != null ? lastModified : "");
+            obj.put("updatedAt", System.currentTimeMillis());
+            byte[] bytes = obj.toString().getBytes(StandardCharsets.UTF_8);
+            try (FileOutputStream fos = new FileOutputStream(metaFile, false)) {
+                fos.write(bytes);
+                fos.flush();
+            }
+        } catch (Exception ignored) {}
+    }
+
+    private boolean isRetryableNetworkError(IOException e) {
+        if (e == null || e.getMessage() == null) return true;
+        String lower = e.getMessage().toLowerCase(Locale.US);
+        if (lower.contains("untrusted") ||
+            lower.contains("insecure redirect") ||
+            lower.contains("package id mismatch") ||
+            lower.contains("signing certificate") ||
+            lower.contains("older than installed") ||
+            lower.contains("no space left") ||
+            lower.contains("enospc") ||
+            lower.contains("http 403") ||
+            lower.contains("http 404")) {
+            return false;
+        }
+        return true;
+    }
+
+    private void deleteQuietly(File file) {
+        if (file != null && file.exists()) {
+            //noinspection ResultOfMethodCallIgnored
+            file.delete();
+        }
     }
 
     /**
@@ -541,11 +902,14 @@ public class ApkUpdaterPlugin extends Plugin {
         }
     }
 
-    private void cleanupOldFiles(File updateDir, String keepFileName) {
+    private void cleanupOldFiles(File updateDir, String keepBaseApkFileName) {
         File[] files = updateDir.listFiles();
         if (files == null) return;
+        String keepPartName = keepBaseApkFileName + ".part";
+        String keepMetaName = keepBaseApkFileName + ".part.meta";
         for (File f : files) {
-            if (!f.getName().equals(keepFileName)) {
+            String name = f.getName();
+            if (!name.equals(keepBaseApkFileName) && !name.equals(keepPartName) && !name.equals(keepMetaName)) {
                 //noinspection ResultOfMethodCallIgnored
                 f.delete();
             }
@@ -568,9 +932,11 @@ public class ApkUpdaterPlugin extends Plugin {
             lower.contains("network is unreachable") ||
             lower.contains("software caused connection abort") ||
             lower.contains("socket closed") ||
+            lower.contains("incomplete apk download") ||
+            lower.contains("unexpected end of stream") ||
             lower.contains("timeout") ||
             lower.contains("timed out")) {
-            return "Network connection interrupted while downloading the update. Please check your internet connection and tap 'Retry Download'.";
+            return "Network connection interrupted while downloading the update. Partial progress was saved—tap 'Download Update' to resume.";
         }
         if (lower.contains("enospc") || lower.contains("no space left")) {
             return "Not enough free storage space on your device to download the update APK.";
